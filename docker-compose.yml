@@ -1,0 +1,73 @@
+# The panel ships as two services: the control plane and Traefik.
+#
+# Traefik is the default proxy because it reads routing rules straight off
+# container labels, which means the panel only has to set labels when it creates a
+# container. Routing and TLS then happen with no proxy API calls.
+
+services:
+  meghify:
+    image: ghcr.io/tamalmaity-dev/meghify:${VERSION:-dev}
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    # The panel talks to the Docker Engine on this host, which is what lets it
+    # manage containers. It is the same privilege boundary Coolify uses.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - meghify-data:/data
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      PANEL_ADDR: ":8080"
+      PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-http://localhost:8080}
+      DB_DRIVER: ${DB_DRIVER:-sqlite}
+      DATA_DIR: /data
+      # Required in production. Generate with: openssl rand -hex 32
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      SESSION_TTL: ${SESSION_TTL:-720h}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-14}
+      REGISTRY_URL: ${REGISTRY_URL:-}
+      REGISTRY_USER: ${REGISTRY_USER:-}
+      REGISTRY_PASS: ${REGISTRY_PASS:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    networks: [meghify]
+    # No healthcheck is needed for the panel itself: Traefik would be the one to
+    # probe it, and the API exposes /api/health for an external check.
+    security_opt:
+      - no-new-privileges:true
+
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-v3.3}
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # The panel's containers are on the panel network; label opt-in makes
+      # Traefik ignore everything else on the host.
+      - "--providers.docker.network=meghify"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--entrypoints.web.http.redirections.permanent=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    networks: [meghify]
+
+volumes:
+  meghify-data:
+  traefik-letsencrypt:
+
+networks:
+  meghify:
+    name: meghify

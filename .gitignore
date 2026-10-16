@@ -1,0 +1,33 @@
+# Development artefacts
+/bin/
+/dist/
+*.exe
+*.log
+
+# Panel data: the sqlite file, build logs and workspaces must never be committed.
+/.devdata/
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend
+/web/node_modules/
+/web/.vite/
+/web/tsconfig.tsbuildinfo
+
+# The embedded SPA. It is a build output; CI regenerates it. A .gitkeep keeps
+# the directory present for `go build` before the first frontend build.
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

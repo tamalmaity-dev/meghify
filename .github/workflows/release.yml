@@ -1,0 +1,104 @@
+name: release
+
+# Push a tag like v0.1.0 and this builds release binaries for linux
+# amd64/arm64/armv7, packages them with the compose file and .env example,
+# stamps scripts/install.sh with the commit, and publishes everything as
+# release assets. The VPS installer then fetches
+# meghify-linux-<arch>.tar.gz from the latest release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: amd64, goarch: amd64, goarm: "" }
+          - { name: arm64, goarch: arm64, goarm: "" }
+          - { name: armv7, goarch: arm, goarm: "7" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the web app (compiles into internal/webui/dist)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Stamp the release version (strip the leading v)
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile the panel binary
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0
+          export GOOS=linux
+          export GOARCH=${{ matrix.goarch }}
+          if [[ -n "${{ matrix.goarm }}" ]]; then
+            export GOARM=${{ matrix.goarm }}
+          fi
+          go build -tags web_assets -trimpath \
+            -ldflags "-s -w \
+              -X github.com/tamalmaity-dev/meghify/internal/version.Version=${{ steps.meta.outputs.version }} \
+              -X github.com/tamalmaity-dev/meghify/internal/version.Commit=${{ steps.meta.outputs.commit }}" \
+            -o meghify ./cmd/meghify
+
+      - name: Package the release archive
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          cp meghify docker-compose.yml .env.example staging/
+          tar -czf "meghify-linux-${{ matrix.name }}.tar.gz" \
+            -C staging meghify docker-compose.yml .env.example
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meghify-linux-${{ matrix.name }}
+          path: meghify-linux-${{ matrix.name }}.tar.gz
+
+  release:
+    name: publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The uploaded installer carries this build's commit. `meghify --version`
+      # reports it, and pinning the installer equals pinning the release.
+      - name: Stamp the installer with this commit
+        run: sed -i "s/__INSTALLER_STAMP__/${GITHUB_SHA::7}/" scripts/install.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Stage the installer
+        run: cp scripts/install.sh dist/install.sh
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/meghify-linux-*.tar.gz
+            dist/install.sh
+          generate_release_notes: true

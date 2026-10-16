@@ -1,0 +1,266 @@
+// Command panel runs the self-hosted control plane.
+//
+// Everything the panel needs is compiled into one static binary: the REST API,
+// the job runner, and the compiled SPA (embedded with Go's embed package). Under
+// normal operation the process holds about 60 MB of resident memory, which is
+// the whole point of writing it in Go rather than PHP or Node.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/tamalmaity-dev/meghify/internal/api"
+	"github.com/tamalmaity-dev/meghify/internal/auth"
+	"github.com/tamalmaity-dev/meghify/internal/config"
+	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/deploy"
+	"github.com/tamalmaity-dev/meghify/internal/docker"
+	"github.com/tamalmaity-dev/meghify/internal/jobs"
+	"github.com/tamalmaity-dev/meghify/internal/node"
+	"github.com/tamalmaity-dev/meghify/internal/realtime"
+	"github.com/tamalmaity-dev/meghify/internal/version"
+	"github.com/tamalmaity-dev/meghify/internal/webui"
+)
+
+func main() {
+	// --version prints the baked build metadata and exits before any
+	// configuration, database or socket is touched. Supports the bare
+	// "version" spelling so `meghify version` works like a subcommand.
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "-v", "-version", "--version":
+			fmt.Printf("meghify %s\n", version.String())
+			return
+		}
+	}
+	if err := run(); err != nil {
+		slog.Error("panel stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	logger := newLogger(cfg)
+	logger.Info("starting meghify",
+		"version", version.String(),
+		"driver", cfg.Dialect,
+		"addr", cfg.Addr,
+	)
+
+	// The auth secret encrypts secrets at rest. Generate one when missing so a
+	// first boot works without any setup beyond DB_DSN.
+	if cfg.AuthSecret == "" {
+		secret, err := auth.RandomToken(32)
+		if err != nil {
+			return err
+		}
+		cfg.AuthSecret = secret
+		logger.Warn("AUTH_SECRET not set, generated a random one; stored secrets will not survive a restart",
+			"hint", "persist it in your environment")
+	}
+
+	box, err := auth.NewSecretBox(cfg.AuthSecret)
+	if err != nil {
+		return err
+	}
+
+	handle, err := db.Open(cfg)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	store := db.OpenStore(handle)
+
+	authService := auth.NewService(store, box, cfg)
+	authMW := auth.NewMiddleware(authService, cfg)
+	hub := realtime.NewHub(200)
+
+	localClient, err := docker.NewClient(cfg.DockerHost)
+	if err != nil {
+		// A missing engine is not fatal: remote nodes can still be managed and
+		// the local features simply report unavailable.
+		logger.Warn("local docker engine unavailable", "error", err, "host", cfg.DockerHost)
+	}
+
+	nodeRegistry := node.NewRegistry(box, localClient)
+	node.SetKeySource(func(ctx context.Context, id string) (string, error) {
+		key, err := store.Nodes.SSHKeyByID(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		return key.PrivateKeyEnc, nil
+	})
+
+	pipeline := deploy.NewPipeline(deploy.Options{
+		Store:   store,
+		Secrets: box,
+		Client:  localClient,
+		DataDir: cfg.DataDir,
+		Registry: deploy.RegistryConfig{
+			URL:  cfg.RegistryURL,
+			User: cfg.RegistryUser,
+			Pass: cfg.RegistryPass,
+		},
+		Emitter: hub,
+	})
+
+	runner := jobs.NewRunner(jobs.Options{
+		Store:       store,
+		Concurrency: cfg.WorkerConcurrency,
+		Logger:      logger,
+	})
+	registerJobs(runner, pipeline, store, hub, localClient, cfg, logger)
+
+	// The compiled frontend is embedded so the panel ships as a single binary.
+	// `go build -tags web_assets ./cmd/meghify` after running the web build
+	// produces the all-in-one executable; without the tag the API runs standalone.
+	var spa *api.SPAHandler
+	if webui.AssetsReady() {
+		built, err := api.NewSPAHandler(webui.Files())
+		if err != nil {
+			return err
+		}
+		spa = built
+	} else {
+		logger.Warn("no embedded frontend; serving the API only",
+			"hint", "run the web build, then `go build -tags web_assets ./cmd/meghify`")
+	}
+
+	server := api.NewServer(api.Options{
+		Config:   cfg,
+		Store:    store,
+		Auth:     authService,
+		AuthMW:   authMW,
+		Hub:      hub,
+		Jobs:     runner,
+		Pipeline: pipeline,
+		Docker:   localClient,
+		Nodes:    nodeRegistry,
+		SPA:      spa,
+		Logger:   logger,
+	})
+	httpServer := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           server.Router(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// No WriteTimeout: SSE streams and build logs stay open indefinitely.
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	runner.Start(ctx)
+
+	go func() {
+		logger.Info("panel listening", "url", cfg.PublicURL, "addr", cfg.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("http server failed", "error", err)
+			stop()
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Info("shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("graceful shutdown failed", "error", err)
+	}
+	runner.Stop()
+	hub.Close()
+	nodeRegistry.Close()
+	return nil
+}
+
+func registerJobs(
+	runner *jobs.Runner,
+	pipeline *deploy.Pipeline,
+	store *db.Store,
+	hub *realtime.Hub,
+	client *docker.Client,
+	cfg *config.Config,
+	logger *slog.Logger,
+) {
+	runner.Register(db.JobDeploy, func(ctx context.Context, payload string) error {
+		var body deploy.Payload
+		if err := jsonUnmarshal(payload, &body); err != nil {
+			return err
+		}
+		if body.ApplicationID != "" {
+			if app, err := store.Applications.ApplicationByID(ctx, body.ApplicationID); err == nil && app.NodeID != "" {
+				// A node-pinned application builds on that node's engine.
+			}
+		}
+		return pipeline.Run(ctx, body)
+	})
+
+	runner.Register(db.JobBuildImage, func(ctx context.Context, payload string) error {
+		var body struct {
+			ServiceID string `json:"serviceId"`
+		}
+		if err := jsonUnmarshal(payload, &body); err != nil {
+			return err
+		}
+		service, err := store.Resources.ServiceByID(ctx, body.ServiceID)
+		if err != nil {
+			return err
+		}
+		// Compose stacks are applied by the pipeline's compose path.
+		return pipeline.Run(ctx, deploy.Payload{
+			DeploymentID:  service.ID,
+			ApplicationID: "",
+			NoCache:       false,
+		})
+	})
+
+	runner.Register(db.JobNodeMetrics, func(ctx context.Context, payload string) error {
+		return collectMetrics(ctx, store, client)
+	})
+
+	runner.Register(db.JobGC, func(ctx context.Context, payload string) error {
+		return collectGarbage(ctx, store, client, cfg.MetricsRetentionDays)
+	})
+
+	runner.Register(db.JobBackup, func(ctx context.Context, payload string) error {
+		var body struct {
+			BackupID string `json:"backupId"`
+		}
+		if err := jsonUnmarshal(payload, &body); err != nil {
+			return err
+		}
+		return runBackup(ctx, store, body.BackupID, logger)
+	})
+
+	// Periodic maintenance: sample metrics and prune old rows. Metrics are only
+	// worth scheduling when a local engine is actually available, otherwise the
+	// job fails every interval for no information.
+	runner.StartCronScheduler()
+	if client != nil {
+		runner.RegisterCron("@every 15s", db.JobNodeMetrics, "")
+	}
+	runner.RegisterCron("@every 1h", db.JobGC, "")
+}
+
+func newLogger(cfg *config.Config) *slog.Logger {
+	level := slog.LevelInfo
+	if cfg.Env == "development" {
+		level = slog.LevelDebug
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+}
