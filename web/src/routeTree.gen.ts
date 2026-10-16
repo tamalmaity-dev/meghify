@@ -10,27 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApplicationsapplicationIdRouteImport } from './routes/applications$applicationId'
 import { Route as DatabasesRouteImport } from './routes/databases'
 import { Route as JobsRouteImport } from './routes/jobs'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as ProjectsRouteImport } from './routes/projects'
-import { Route as ProjectsprojectIdRouteImport } from './routes/projects$projectId'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TeamRouteImport } from './routes/team'
+import { Route as ApplicationsApplicationIdRouteImport } from './routes/applications.$applicationId'
+import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
+import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApplicationsapplicationIdRoute =
-  ApplicationsapplicationIdRouteImport.update({
-    id: '/applications$applicationId',
-    path: '/applications$applicationId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const DatabasesRoute = DatabasesRouteImport.update({
   id: '/databases',
   path: '/databases',
@@ -56,11 +51,6 @@ const ProjectsRoute = ProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjectsprojectIdRoute = ProjectsprojectIdRouteImport.update({
-  id: '/projects$projectId',
-  path: '/projects$projectId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -71,94 +61,113 @@ const TeamRoute = TeamRouteImport.update({
   path: '/team',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApplicationsApplicationIdRoute =
+  ApplicationsApplicationIdRouteImport.update({
+    id: '/applications/$applicationId',
+    path: '/applications/$applicationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProjectsRoute,
+} as any)
+const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
+  id: '/$projectId',
+  path: '/$projectId',
+  getParentRoute: () => ProjectsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/applications$applicationId': typeof ApplicationsapplicationIdRoute
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRoute
-  '/projects': typeof ProjectsRoute
-  '/projects$projectId': typeof ProjectsprojectIdRoute
+  '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/team': typeof TeamRoute
+  '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/': typeof ProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/applications$applicationId': typeof ApplicationsapplicationIdRoute
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRoute
-  '/projects': typeof ProjectsRoute
-  '/projects$projectId': typeof ProjectsprojectIdRoute
   '/settings': typeof SettingsRoute
   '/team': typeof TeamRoute
+  '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects': typeof ProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/applications$applicationId': typeof ApplicationsapplicationIdRoute
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRoute
-  '/projects': typeof ProjectsRoute
-  '/projects$projectId': typeof ProjectsprojectIdRoute
+  '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/team': typeof TeamRoute
+  '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/projects/': typeof ProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/applications$applicationId'
     | '/databases'
     | '/jobs'
     | '/login'
     | '/nodes'
     | '/projects'
-    | '/projects$projectId'
     | '/settings'
     | '/team'
+    | '/applications/$applicationId'
+    | '/projects/$projectId'
+    | '/projects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/applications$applicationId'
     | '/databases'
     | '/jobs'
     | '/login'
     | '/nodes'
-    | '/projects'
-    | '/projects$projectId'
     | '/settings'
     | '/team'
+    | '/applications/$applicationId'
+    | '/projects/$projectId'
+    | '/projects'
   id:
     | '__root__'
     | '/'
-    | '/applications$applicationId'
     | '/databases'
     | '/jobs'
     | '/login'
     | '/nodes'
     | '/projects'
-    | '/projects$projectId'
     | '/settings'
     | '/team'
+    | '/applications/$applicationId'
+    | '/projects/$projectId'
+    | '/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApplicationsapplicationIdRoute: typeof ApplicationsapplicationIdRoute
   DatabasesRoute: typeof DatabasesRoute
   JobsRoute: typeof JobsRoute
   LoginRoute: typeof LoginRoute
   NodesRoute: typeof NodesRoute
-  ProjectsRoute: typeof ProjectsRoute
-  ProjectsprojectIdRoute: typeof ProjectsprojectIdRoute
+  ProjectsRoute: typeof ProjectsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   TeamRoute: typeof TeamRoute
+  ApplicationsApplicationIdRoute: typeof ApplicationsApplicationIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -168,13 +177,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/applications$applicationId': {
-      id: '/applications$applicationId'
-      path: '/applications$applicationId'
-      fullPath: '/applications$applicationId'
-      preLoaderRoute: typeof ApplicationsapplicationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/databases': {
@@ -212,13 +214,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/projects$projectId': {
-      id: '/projects$projectId'
-      path: '/projects$projectId'
-      fullPath: '/projects$projectId'
-      preLoaderRoute: typeof ProjectsprojectIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -233,20 +228,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/applications/$applicationId': {
+      id: '/applications/$applicationId'
+      path: '/applications/$applicationId'
+      fullPath: '/applications/$applicationId'
+      preLoaderRoute: typeof ApplicationsApplicationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof ProjectsRoute
+    }
+    '/projects/$projectId': {
+      id: '/projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ProjectsProjectIdRouteImport
+      parentRoute: typeof ProjectsRoute
+    }
   }
 }
 
+interface ProjectsRouteChildren {
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
+}
+
+const ProjectsRouteChildren: ProjectsRouteChildren = {
+  ProjectsProjectIdRoute: ProjectsProjectIdRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
+}
+
+const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
+  ProjectsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApplicationsapplicationIdRoute: ApplicationsapplicationIdRoute,
   DatabasesRoute: DatabasesRoute,
   JobsRoute: JobsRoute,
   LoginRoute: LoginRoute,
   NodesRoute: NodesRoute,
-  ProjectsRoute: ProjectsRoute,
-  ProjectsprojectIdRoute: ProjectsprojectIdRoute,
+  ProjectsRoute: ProjectsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   TeamRoute: TeamRoute,
+  ApplicationsApplicationIdRoute: ApplicationsApplicationIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -492,6 +492,6 @@ function TerminalModal({
   );
 }
 
-export const Route = createFileRoute("/applications$applicationId")({
+export const Route = createFileRoute("/applications/$applicationId")({
   component: ApplicationDetailPage,
 });

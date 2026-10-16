@@ -307,6 +307,6 @@ export function ProjectDetailPage() {
   );
 }
 
-export const Route = createFileRoute("/projects$projectId")({
+export const Route = createFileRoute("/projects/$projectId")({
   component: ProjectDetailPage,
 });
