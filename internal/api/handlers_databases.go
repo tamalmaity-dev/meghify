@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -167,10 +168,18 @@ func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imageRef := defaults.Image
+	// Fresh VPS images are not local yet; pull the database image before creating
+	// its container so the first create works without a manual docker pull.
+	imageRef := defaults.Image + ":" + defaults.Version
+	if err := client.PullImage(r.Context(), imageRef, io.Discard); err != nil {
+		s.store.Resources.PatchDatabaseStatus(r.Context(), database.ID, db.StatusError)
+		writeError(w, http.StatusInternalServerError, "pull image: "+err.Error())
+		return
+	}
+
 	spec := dockerSpec{
 		Name:    database.Name,
-		Image:   imageRef + ":" + defaults.Version,
+		Image:   imageRef,
 		Env:     databaseEnv(rootPassword),
 		Labels:  map[string]string{"meghify.resource": "database", "meghify.database": database.ID},
 		Ports:   map[int]int{defaults.Port: database.PublicPort},
@@ -256,8 +265,50 @@ func (s *Server) databaseAction(w http.ResponseWriter, r *http.Request, action s
 		return
 	}
 	if container == nil {
-		s.store.Resources.PatchDatabaseStatus(r.Context(), id, db.StatusStopped)
-		writeJSON(w, http.StatusOK, map[string]string{"status": db.StatusStopped})
+		if action == "stop" {
+			s.store.Resources.PatchDatabaseStatus(r.Context(), id, db.StatusStopped)
+			writeJSON(w, http.StatusOK, map[string]string{"status": db.StatusStopped})
+			return
+		}
+		// A prune or manual cleanup removed the container. Recreate it from the
+		// stored definition: the data volume and the sealed root password survive.
+		defaults := databaseSpec(database.Kind, database.Version)
+		imageRef := defaults.Image + ":" + defaults.Version
+		if err := s.docker.PullImage(r.Context(), imageRef, io.Discard); err != nil {
+			writeError(w, http.StatusInternalServerError, "pull image: "+err.Error())
+			return
+		}
+
+		rootPassword := ""
+		if vars, verr := s.store.Applications.EnvVarsByTarget(r.Context(), db.TargetDatabase, id); verr == nil {
+			for _, variable := range vars {
+				if variable.Key == "ROOT_PASSWORD" {
+					if plain, oerr := s.auth.Open(variable.ValueEnc); oerr == nil {
+						rootPassword = plain
+					}
+				}
+			}
+		}
+
+		containerID, cerr := s.docker.CreateContainer(r.Context(), dockerSpec{
+			Name:    database.Name,
+			Image:   imageRef,
+			Env:     databaseEnv(rootPassword),
+			Labels:  map[string]string{"meghify.resource": "database", "meghify.database": id},
+			Ports:   map[int]int{defaults.Port: database.PublicPort},
+			Restart: "unless-stopped",
+			Volumes: []mountSpec{{Source: "meghify-db-" + database.ID, Target: defaults.DataPath}},
+		}.toDocker())
+		if cerr != nil {
+			writeError(w, http.StatusInternalServerError, cerr.Error())
+			return
+		}
+		if serr := s.docker.StartContainer(r.Context(), containerID); serr != nil {
+			writeError(w, http.StatusInternalServerError, serr.Error())
+			return
+		}
+		s.store.Resources.PatchDatabaseStatus(r.Context(), id, db.StatusRunning)
+		writeJSON(w, http.StatusOK, map[string]string{"status": db.StatusRunning})
 		return
 	}
 
