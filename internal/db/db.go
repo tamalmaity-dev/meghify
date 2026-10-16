@@ -49,7 +49,49 @@ func OpenPath(dsn string) (*sql.DB, error) {
 	return open(driver, dsn)
 }
 
+// sqlitePragmas are applied to every pooled connection through the DSN.
+//
+// busy_timeout and foreign_keys are per-connection settings: running them once
+// on the pool handle configures only whichever connection happened to serve
+// the statement, leaving the rest with busy_timeout=0 (instant SQLITE_BUSY)
+// and foreign key enforcement off. The driver honors _pragma options on every
+// connection it opens.
+var sqlitePragmas = []string{
+	"busy_timeout(5000)",
+	"journal_mode(WAL)",
+	"synchronous(NORMAL)",
+	"foreign_keys(1)",
+	"temp_store(MEMORY)",
+	"cache_size(-8000)",
+}
+
+// sqliteDSN appends the shared pragmas to a sqlite DSN. Pragmas the caller has
+// already configured in the DSN win over the defaults; everything else is
+// appended so no connection silently loses foreign key enforcement or the
+// busy timeout.
+func sqliteDSN(dsn string) string {
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	parts := make([]string, 0, len(sqlitePragmas))
+	for _, p := range sqlitePragmas {
+		key := p[:strings.IndexByte(p, '(')]
+		if strings.Contains(dsn, key+"(") || strings.Contains(dsn, key+"=") || strings.Contains(dsn, key+"%3") {
+			continue
+		}
+		parts = append(parts, "_pragma="+p)
+	}
+	if len(parts) == 0 {
+		return dsn
+	}
+	return dsn + sep + strings.Join(parts, "&")
+}
+
 func open(dialect config.Dialect, dsn string) (*sql.DB, error) {
+	if dialect == config.DialectSQLite {
+		dsn = sqliteDSN(dsn)
+	}
 	handle, err := sql.Open(dialect.String(), dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", dialect, err)
@@ -60,22 +102,6 @@ func open(dialect config.Dialect, dsn string) (*sql.DB, error) {
 	handle.SetMaxOpenConns(8)
 	handle.SetMaxIdleConns(4)
 	handle.SetConnMaxLifetime(time.Hour)
-
-	if dialect == config.DialectSQLite {
-		for _, pragma := range []string{
-			"PRAGMA journal_mode=WAL",
-			"PRAGMA synchronous=NORMAL",
-			"PRAGMA foreign_keys=ON",
-			"PRAGMA busy_timeout=5000",
-			"PRAGMA temp_store=MEMORY",
-			"PRAGMA cache_size=-8000",
-		} {
-			if _, err := handle.Exec(pragma); err != nil {
-				handle.Close()
-				return nil, fmt.Errorf("apply %q: %w", pragma, err)
-			}
-		}
-	}
 
 	if err := handle.Ping(); err != nil {
 		handle.Close()

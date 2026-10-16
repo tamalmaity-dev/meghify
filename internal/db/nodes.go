@@ -27,6 +27,21 @@ func (r *NodeRepo) CreateNode(ctx context.Context, n *Node) error {
 	return nil
 }
 
+// EnsureLocalNode creates the singleton row that local engine metrics are
+// recorded against. node_metrics.node_id is foreign-keyed to nodes, so without
+// this row a fresh install fails every local sample with a constraint error.
+func (r *NodeRepo) EnsureLocalNode(ctx context.Context) error {
+	now := Text(time.Now().UTC())
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO nodes (id, name, address, status, created_at, updated_at)
+		 VALUES ('local', 'This server', 'localhost', ?, ?, ?)
+		 ON CONFLICT (id) DO NOTHING`, NodeOnline, now, now)
+	if err != nil {
+		return fmt.Errorf("ensure local node: %w", err)
+	}
+	return nil
+}
+
 const nodeColumns = `id, name, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
                      cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at`
 

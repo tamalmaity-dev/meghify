@@ -15,9 +15,10 @@ func jsonUnmarshal(payload string, dst any) error { return json.Unmarshal([]byte
 
 // collectMetrics samples the local engine and stores the result.
 //
-// The row is written against a synthetic "local" node id so the dashboard can
-// render one series even when no remote nodes exist yet. A machine with no
-// Docker engine simply produces no samples rather than failing every interval.
+// The row is written against the "local" node id so the dashboard can render
+// one series even when no remote nodes exist yet; the matching nodes row is
+// created on first collection. A machine with no Docker engine simply produces
+// no samples rather than failing every interval.
 func collectMetrics(ctx context.Context, store *db.Store, client *docker.Client) error {
 	if client == nil {
 		return nil
@@ -38,6 +39,11 @@ func collectMetrics(ctx context.Context, store *db.Store, client *docker.Client)
 		NodeID:     "local",
 		RecordedAt: time.Now().UTC(),
 		MemTotal:   info.MemTotal,
+	}
+	// Metric rows are foreign-keyed to nodes, so the local row must exist
+	// before the first sample on a fresh install.
+	if err := store.Nodes.EnsureLocalNode(ctx); err != nil {
+		return err
 	}
 	return store.Nodes.InsertMetric(ctx, sample)
 }
