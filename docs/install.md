@@ -216,7 +216,7 @@ a copy fetched straight from `main` reports `source (main branch)`.
 
 | Symptom | Cause and fix |
 |---|---|
-| `port 8080 is already in use` | something else listens there — re-run with `APP_PORT=<other>` (or edit `.env` and restart) |
+| `port 8080 is already in use` | something else (not Meghify) listens there — re-run with `APP_PORT=<other>` (or edit `.env` and restart). A re-run over an existing Meghify install recognizes its own panel and proceeds |
 | `the panel installs anyway, app deploys wait` | Docker daemon down: `journalctl -u docker`; re-run the installer after fixing |
 | panel not healthy after install | `journalctl -u meghify` (systemd modes) or `docker compose -p meghify logs` (Docker mode) |
 | release tarball download fails | GitHub API rate limit (60 req/h per IP) — usually transient, retry in ~1 h; the installer falls back to a source build meanwhile |

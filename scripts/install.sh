@@ -534,8 +534,45 @@ port_busy() {
     return 1
   fi
 }
+
+# port_held_by_meghify — a re-run replaces the previous install, so a listener
+# that is that install itself (systemd binary or compose container) is not a
+# port conflict: the panel necessarily holds its own port while being updated.
+port_held_by_meghify() {
+  local line pid exe
+  if command -v ss >/dev/null 2>&1; then
+    line="$(ss -ltnpH "sport = :${APP_PORT}" 2>/dev/null | head -n1)" || line=""
+    pid="${line#*pid=}"; pid="${pid%%,*}"; pid="${pid%%)*}"
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+      exe="$(readlink "/proc/${pid}/exe" 2>/dev/null)" || exe=""
+      exe="${exe% (deleted)}"
+      case "$exe" in
+        */meghify|*/meghify.new) return 0 ;;
+      esac
+    fi
+    case "$line" in
+      *'"meghify"'*) return 0 ;;
+    esac
+  elif command -v netstat >/dev/null 2>&1; then
+    line="$(netstat -ltnp 2>/dev/null | grep -E "[:.]${APP_PORT}[[:space:]]" | head -n1)" || line=""
+    case "$line" in
+      *meghify*) return 0 ;;
+    esac
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | grep -E '^meghify' | grep -q ":${APP_PORT}->"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 if port_busy; then
-  fail "port ${APP_PORT} is already in use (set APP_PORT=<port> before installing)"; BROKEN+=("port")
+  if port_held_by_meghify; then
+    ok "port ${APP_PORT} is held by the running Meghify install — it will be replaced in place"
+  else
+    fail "port ${APP_PORT} is already in use (set APP_PORT=<port> before installing)"; BROKEN+=("port")
+  fi
 else
   ok "port ${APP_PORT} is free"
 fi
@@ -764,7 +801,10 @@ EOF
     fi
     mv -f "$PANEL_DIR/meghify.new" "$PANEL_DIR/meghify"
   fi
-  systemctl enable --now meghify >/dev/null 2>&1
+  systemctl enable meghify >/dev/null 2>&1
+  # restart rather than `enable --now`: on a re-run the old process still
+  # holds the port and must be replaced by the freshly swapped binary.
+  systemctl restart meghify
 fi
 
 if wait_healthy; then
