@@ -91,9 +91,18 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFrom(r.Context())
 	if user == nil {
+		// A fresh install has no accounts yet; tell the UI so the sign-in
+		// screen can present account creation instead of a dead login form.
+		needsBootstrap := false
+		if hasUsers, err := s.auth.HasUsers(r.Context()); err != nil {
+			s.logger.Error("session: count users", "error", err)
+		} else {
+			needsBootstrap = !hasUsers
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"authenticated": false,
-			"version":       version.Version,
+			"authenticated":  false,
+			"version":        version.Version,
+			"needsBootstrap": needsBootstrap,
 		})
 		return
 	}

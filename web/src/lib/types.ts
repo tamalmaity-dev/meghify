@@ -17,6 +17,8 @@ export interface Session {
   authenticated: boolean;
   user?: User;
   version?: string;
+  /** True while the instance has no accounts, so the UI can offer sign-up. */
+  needsBootstrap?: boolean;
 }
 
 export interface Project {

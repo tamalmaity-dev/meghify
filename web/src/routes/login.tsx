@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ type Mode = "login" | "bootstrap";
  * users the form becomes a bootstrap flow and creates the first admin.
  */
 export function LoginPage() {
-  const { version } = useSession();
+  const { version, needsBootstrap } = useSession();
   const navigate = useNavigate();
   const login = useLogin();
   const bootstrap = useBootstrap();
@@ -26,6 +26,13 @@ export function LoginPage() {
   const [code, setCode] = useState("");
   const [needsCode, setNeedsCode] = useState(false);
   const [error, setError] = useState("");
+
+  // A brand-new instance opens straight into account creation so the first
+  // visitor never stares at a login form that cannot succeed yet. The effect
+  // only fires when the flag arrives, so a manual mode switch is respected.
+  useEffect(() => {
+    if (needsBootstrap) setMode("bootstrap");
+  }, [needsBootstrap]);
 
   const submit = async () => {
     setError("");

@@ -19,6 +19,7 @@ export function useSession() {
   return {
     user: query.data?.user as User | undefined,
     authenticated: query.data?.authenticated === true,
+    needsBootstrap: query.data?.needsBootstrap === true,
     version: query.data?.version,
     isLoading: query.isLoading,
   };
