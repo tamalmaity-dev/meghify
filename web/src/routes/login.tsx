@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";

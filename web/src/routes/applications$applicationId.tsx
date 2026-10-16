@@ -137,8 +137,8 @@ export function ApplicationDetailPage() {
               <CardTitle>Configuration</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-[12px]">
-              <Row label="Build pack" value={app.data?.buildPack} />
-              <Row label="Branch" value={app.data?.gitBranch} />
+              <Row label="Build pack" value={app.data?.buildPack ?? "-"} />
+              <Row label="Branch" value={app.data?.gitBranch ?? "-"} />
               <Row label="Container port" value={String(app.data?.port ?? "-")} />
               <Row label="Health check" value={app.data?.healthCheck || "-"} />
               <Row label="Base directory" value={app.data?.baseDirectory || "/"} />
@@ -275,7 +275,8 @@ function DeploymentLogs({ deploymentId }: { deploymentId?: string }) {
 
         for await (const event of streamEvents(`/api/stream?channel=deployment:${deploymentId}`, controller.signal)) {
           if (event.event === "log" && typeof event.line === "string") {
-            setLines((current) => [...current, event.line]);
+            const line = event.line;
+            setLines((current) => [...current, line]);
           }
         }
       } catch {

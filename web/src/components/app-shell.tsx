@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { Link, Outlet } from "@tanstack/react-router";
 import {
   Boxes,
   Database,

@@ -11,7 +11,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { BUILD_PACKS, DATABASE_KINDS } from "@/lib/types";
-import type { Application, Database, Project, Service } from "@/lib/types";
+import type { Application, Database, Project } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 export function ProjectDetailPage() {
@@ -41,11 +41,6 @@ export function ProjectDetailPage() {
   const databases = useQuery({
     queryKey: ["databases"],
     queryFn: () => api.get<Database[]>("/databases"),
-  });
-  const services = useQuery({
-    queryKey: ["services", { environmentId: "" }],
-    queryFn: () => api.get<Service[]>("/services"),
-    enabled: false,
   });
 
   const [envId, setEnvId] = useState("");

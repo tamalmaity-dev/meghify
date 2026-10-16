@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Session, User } from "@/lib/types";
@@ -74,7 +73,7 @@ export function useTotpConfirm() {
 
 export function useTotpDisable() {
   return useMutation({
-    mutationFn: (password: string) => api.delete("/me/totp"),
+    mutationFn: (password: string) => api.delete("/me/totp", { password }),
   });
 }
 
