@@ -55,7 +55,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	if _, token, err := s.auth.IssueSession(r.Context(), user, clientIP(r), r.UserAgent()); err != nil {
 		s.logger.Error("issue bootstrap session", "error", err)
 	} else {
-		s.setSessionCookie(w, token, time.Now().Add(s.cfg.SessionTTL))
+		s.setSessionCookie(w, r, token, time.Now().Add(s.cfg.SessionTTL))
 	}
 	s.audit(r.Context(), r, "auth.bootstrap", "user", user.ID, nil)
 	writeJSON(w, http.StatusCreated, user)
@@ -74,7 +74,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	s.setSessionCookie(w, token, session.ExpiresAt)
+	s.setSessionCookie(w, r, token, session.ExpiresAt)
 	s.audit(r.Context(), r, "auth.login", "user", user.ID, nil)
 	writeJSON(w, http.StatusOK, user)
 }
@@ -104,7 +104,14 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
+// setSessionCookie stores the session token.
+//
+// The cookie is only marked Secure when the request actually arrived over TLS
+// or the panel is published behind an https:// URL: every browser silently
+// drops Secure cookies on plain-http origins, which would make an http://
+// install impossible to sign in to.
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+	secure := r.TLS != nil || strings.HasPrefix(strings.ToLower(s.cfg.PublicURL), "https://")
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.SessionCookieName,
 		Value:    token,
@@ -112,7 +119,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, token string, expires t
 		Expires:  expires,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   s.cfg.IsProduction(),
+		Secure:   secure,
 	})
 }
 

@@ -90,6 +90,12 @@ func (s *Server) Router() http.Handler {
 	s.hub.Mount(r)
 
 	r.Route("/api/auth", func(r chi.Router) {
+		// Resolve the caller when a session cookie is present so /session can
+		// report who is signed in and /logout can revoke the right session.
+		// Anonymous requests still pass through — bootstrap and login must stay
+		// reachable without a session.
+		r.Use(s.authMW.Authenticate)
+
 		r.Post("/bootstrap", s.bootstrap)
 		r.Post("/login", s.login)
 		r.Post("/logout", s.logout)
