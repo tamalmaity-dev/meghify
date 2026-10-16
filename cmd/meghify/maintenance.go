@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/tamalmaity-dev/meghify/internal/db"
@@ -13,39 +14,40 @@ import (
 // jsonUnmarshal parses a job payload.
 func jsonUnmarshal(payload string, dst any) error { return json.Unmarshal([]byte(payload), dst) }
 
-// collectMetrics samples the local engine and stores the result.
+// collectMetrics samples the machine the panel runs on and stores the result.
 //
-// The row is written against the "local" node id so the dashboard can render
-// one series even when no remote nodes exist yet; the matching nodes row is
-// created on first collection. A machine with no Docker engine simply produces
-// no samples rather than failing every interval.
-func collectMetrics(ctx context.Context, store *db.Store, client *docker.Client) error {
-	if client == nil {
-		return nil
-	}
-	// A failed ping means the engine is down; retrying at the 15s cadence would
-	// only fill the log and the job table.
-	if err := client.Ping(ctx); err != nil {
+// Sampling reads the host directly (CPU, memory, disk, network), not the
+// Docker engine, so metrics keep flowing when the engine is down. The row is
+// written against the "local" node id so the dashboard can render one series
+// even when no remote nodes exist yet; the matching nodes row is created and
+// kept fresh on every collection.
+func collectMetrics(ctx context.Context, store *db.Store) error {
+	sample, ok := hostSampleNow()
+	if !ok {
 		return nil
 	}
 
-	info, err := client.Info(ctx)
-	if err != nil {
-		return err
-	}
-
-	sample := &db.NodeMetrics{
-		ID:         db.NewID(),
-		NodeID:     "local",
-		RecordedAt: time.Now().UTC(),
-		MemTotal:   info.MemTotal,
-	}
 	// Metric rows are foreign-keyed to nodes, so the local row must exist
 	// before the first sample on a fresh install.
 	if err := store.Nodes.EnsureLocalNode(ctx); err != nil {
 		return err
 	}
-	return store.Nodes.InsertMetric(ctx, sample)
+	if err := store.Nodes.UpdateLocalNodeInfo(ctx, sample.OS, sample.Kernel, sample.CPUs, sample.MemTotal); err != nil {
+		return err
+	}
+
+	return store.Nodes.InsertMetric(ctx, &db.NodeMetrics{
+		ID:         db.NewID(),
+		NodeID:     "local",
+		CPUPercent: math.Round(sample.CPUPercent*10) / 10,
+		MemUsed:    sample.MemUsed,
+		MemTotal:   sample.MemTotal,
+		DiskUsed:   sample.DiskUsed,
+		DiskTotal:  sample.DiskTotal,
+		NetRx:      sample.NetRx,
+		NetTx:      sample.NetTx,
+		RecordedAt: time.Now().UTC(),
+	})
 }
 
 // collectGarbage enforces the retention window and prunes unused artifacts.

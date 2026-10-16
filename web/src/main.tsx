@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { queryClient } from "@/lib/api";
 import { routeTree } from "@/routeTree.gen";
+import "./styles.css";
 import "@xterm/xterm/css/xterm.css";
 
 createRoot(document.getElementById("root")!).render(

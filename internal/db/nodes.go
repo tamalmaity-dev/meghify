@@ -42,6 +42,21 @@ func (r *NodeRepo) EnsureLocalNode(ctx context.Context) error {
 	return nil
 }
 
+// UpdateLocalNodeInfo refreshes the discoverable hardware facts of the local
+// node so the servers list and dashboard show real numbers instead of empty
+// fields. It also marks the row as seen now.
+func (r *NodeRepo) UpdateLocalNodeInfo(ctx context.Context, osName, kernel string, cpus int, memoryBytes int64) error {
+	now := Text(time.Now().UTC())
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE nodes SET os = ?, kernel = ?, cpus = ?, memory_bytes = ?, last_seen_at = ?, updated_at = ?
+		  WHERE id = 'local'`,
+		osName, kernel, cpus, memoryBytes, now, now)
+	if err != nil {
+		return fmt.Errorf("update local node info: %w", err)
+	}
+	return nil
+}
+
 const nodeColumns = `id, name, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
                      cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at`
 

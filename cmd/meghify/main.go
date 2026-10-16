@@ -230,7 +230,7 @@ func registerJobs(
 	})
 
 	runner.Register(db.JobNodeMetrics, func(ctx context.Context, payload string) error {
-		return collectMetrics(ctx, store, client)
+		return collectMetrics(ctx, store)
 	})
 
 	runner.Register(db.JobGC, func(ctx context.Context, payload string) error {
@@ -247,13 +247,11 @@ func registerJobs(
 		return runBackup(ctx, store, body.BackupID, logger)
 	})
 
-	// Periodic maintenance: sample metrics and prune old rows. Metrics are only
-	// worth scheduling when a local engine is actually available, otherwise the
-	// job fails every interval for no information.
+	// Periodic maintenance: sample the host every 15s and prune old rows
+	// hourly. The metrics job reads the machine directly, so it runs even when
+	// the Docker engine is unavailable.
 	runner.StartCronScheduler()
-	if client != nil {
-		runner.RegisterCron("@every 15s", db.JobNodeMetrics, "")
-	}
+	runner.RegisterCron("@every 15s", db.JobNodeMetrics, "")
 	runner.RegisterCron("@every 1h", db.JobGC, "")
 }
 
