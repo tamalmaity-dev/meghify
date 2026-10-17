@@ -57,9 +57,20 @@ panel ──> helper container ──> build sandbox (meghify-buildd, limited CP
 - Docker Compose stacks are the exception: `docker compose up` must create
   the application containers on the host engine, so compose deployments keep
   the mounted engine socket.
-- `BUILD_SANDBOX` selects the behavior: `auto` (default) falls back to the
-  legacy socket-mounted helper when nested Docker is not permitted, `on`
+- `BUILD_SANDBOX` selects the behavior: `auto` (default) falls back to
+  the legacy socket-mounted helper when nested Docker is not permitted, `on`
   makes a sandbox failure an error, `off` disables the sandbox entirely.
+- **Builds can reach sibling services by name.** A build process cannot use
+  user-defined-network DNS (there is no network attached to a build), so
+  `next build` running against a database service would fail to resolve its
+  host. Before every Dockerfile and nixpacks build the panel assembles the
+  `--add-host name:ip` entries of the application's private network — the
+  same mapping Coolify passes to each build — so code that renders against a
+  real service during prerendering works.
+- Nixpacks builds go through the same two steps Coolify uses:
+  `nixpacks build --out` only generates the Dockerfile, and the panel then
+  runs `docker build` itself — that is why the host entries and the image
+  labels above are possible at all.
 
 ## The build helper container
 
@@ -103,6 +114,19 @@ restart`), startup recovery marks the in-flight deployment **canceled**
 container, removes orphaned helpers and deletes half-created rolling-release
 containers — so the next deploy is never blocked by a stuck row. Dokploy does
 the same at boot (`initCancelDeployments`).
+
+## Every release is confirmed
+
+The rolling release starts the replacement first, health checks it (when the
+application has a health check, for 90s), retires the old container only
+afterwards, and reverts on failure — the domain never serves a half-released
+application. Containers **without** a health check get a short startup
+confirmation instead: a container that exits inside the first seconds (a
+missing environment variable, an OOM kill, a broken start command), or one
+whose restart policy is already counting restarts, fails the deployment. The
+container's own recent output is copied into the deployment log, so the
+failure explains itself without a trip to the server shell — and the previous
+deployment keeps running.
 
 ## Build packs
 
