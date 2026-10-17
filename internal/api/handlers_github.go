@@ -332,9 +332,17 @@ func (s *Server) gitHubSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 // installationOwner finds the configured app that manages an installation. The
-// state parameter is the fast path; falling back to probing every configured
-// app covers installations started from GitHub's own "Install" pages.
+// panel's install links carry the source's id as the state parameter, so a
+// direct lookup resolves the common case; the manifest token and probing every
+// configured app cover installations started from GitHub's own "Install" pages.
 func (s *Server) installationOwner(ctx context.Context, state string, installationID int64) (*db.GitHubApp, *github.Installation, error) {
+	if state != "" {
+		if app, err := s.store.GitHub.GitHubAppByID(ctx, state); err == nil && app.Configured() {
+			if installation, err := s.installationDetail(ctx, app, installationID); err == nil {
+				return app, installation, nil
+			}
+		}
+	}
 	if app, err := s.store.GitHub.GitHubAppByState(ctx, state); err == nil && app.Configured() {
 		if installation, err := s.installationDetail(ctx, app, installationID); err == nil {
 			return app, installation, nil

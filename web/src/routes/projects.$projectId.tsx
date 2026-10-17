@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database as DatabaseIcon,
+  ExternalLink,
   FileCode2,
   GitBranch,
   Github,
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/app-shell";
+import { GitHubAppDialog } from "@/components/github-app-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -26,6 +28,7 @@ import { Modal } from "@/components/ui/modal";
 import type {
   Application,
   Database,
+  GitHubApp,
   GitHubInstallation,
   GitHubRepository,
   GitHubRepositoryList,
@@ -167,6 +170,9 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 
 const initials = (name: string) => name.trim().slice(0, 2).toUpperCase() || "AP";
 
+/** github.com unless the source points at a GitHub Enterprise server. */
+const gitHubWebBase = (app: GitHubApp) => app.baseUrl || "https://github.com";
+
 export function ProjectDetailPage() {
   const { projectId } = useParams({ from: "/projects/$projectId" });
   const queryClient = useQueryClient();
@@ -191,13 +197,14 @@ export function ProjectDetailPage() {
   const [dbForm, setDbForm] = useState<{ name: string; kind: string; version: string } | null>(null);
   const [credentials, setCredentials] = useState<{ user: string; password: string; port: number } | null>(null);
 
-  // GitHub App flow: pick an installation, then a repository, and the usual
-  // application form opens prefilled with the repository and its branch.
+  // GitHub App flow: pick a source (GitHub App), then the account it is
+  // installed on, then a repository; the application form opens prefilled.
   const [githubStep, setGithubStep] = useState<"apps" | "repos" | null>(null);
   const [githubInstallation, setGithubInstallation] = useState<GitHubInstallation | null>(null);
   const [githubRepo, setGithubRepo] = useState<GitHubRepository | null>(null);
   const [repoSearch, setRepoSearch] = useState("");
   const [autoDeploy, setAutoDeploy] = useState(true);
+  const [newAppOpen, setNewAppOpen] = useState(false);
 
   const project = useQuery({
     queryKey: ["projects", projectId],
@@ -214,6 +221,11 @@ export function ProjectDetailPage() {
   const environments = useQuery({
     queryKey: ["environments", projectId],
     queryFn: () => api.get<{ id: string; name: string }[]>(`/projects/${projectId}/environments`),
+  });
+  const githubApps = useQuery({
+    queryKey: ["github-apps"],
+    queryFn: () => api.get<GitHubApp[]>("/github/apps"),
+    enabled: githubStep !== null,
   });
   const githubInstallations = useQuery({
     queryKey: ["github-installations"],
@@ -232,6 +244,8 @@ export function ProjectDetailPage() {
   const environmentId = envId || environments.data?.[0]?.id || "";
   const appList = (apps.data ?? []).filter((app) => app.environmentId === environmentId);
   const dbList = (databases.data ?? []).filter((db) => db.environmentId === environmentId);
+  const installationsFor = (appId: string) =>
+    (githubInstallations.data ?? []).filter((installation) => installation.githubAppId === appId);
 
   const needsDockerfilePath =
     appSource === "dockerfile" ||
@@ -533,84 +547,173 @@ export function ProjectDetailPage() {
 
           <PageHeader
             title="Choose GitHub App"
-            description="Pick the GitHub account Meghify should use to reach your repositories."
+            description="Pick the GitHub App and account Meghify should use to reach your repositories."
+            actions={
+              <>
+                <Button
+                  variant="neutral"
+                  onClick={() => syncInstallations.mutate()}
+                  disabled={syncInstallations.isPending}
+                  title="Refresh installations from GitHub"
+                >
+                  <RefreshCw
+                    className={syncInstallations.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+                  />
+                  Refresh
+                </Button>
+                <Button variant="primary" onClick={() => setNewAppOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  New GitHub App
+                </Button>
+              </>
+            }
           />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>GitHub App installations</CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => syncInstallations.mutate()}
-                disabled={syncInstallations.isPending}
-                title="Refresh installations from GitHub"
-              >
-                <RefreshCw
-                  className={syncInstallations.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}
-                />
-                Refresh
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              {githubInstallations.isLoading ? (
-                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
-                  Loading installations…
-                </p>
-              ) : (githubInstallations.data ?? []).length === 0 ? (
-                <div className="px-4 py-8 text-center">
-                  <p className="text-[12px] text-black/45 dark:text-white/40">
-                    No GitHub App is installed on any account yet.
+          {githubApps.isLoading ? (
+            <Card>
+              <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                Loading GitHub Apps…
+              </CardContent>
+            </Card>
+          ) : githubApps.isError ? (
+            <Card>
+              <CardContent className="py-8 text-center text-[12px] text-danger">
+                {errorText(githubApps.error)}
+              </CardContent>
+            </Card>
+          ) : (githubApps.data ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                  <Github className="h-5 w-5 opacity-70" />
+                </span>
+                <div>
+                  <div className="text-[13px] font-medium">No GitHub sources yet</div>
+                  <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-black/45 dark:text-white/40">
+                    Create a GitHub App to deploy private repositories and redeploy automatically
+                    when code is pushed. Meghify walks you through creating it on GitHub.
                   </p>
-                  <Link
-                    to="/sources"
-                    className="mt-2 inline-block text-[12px] text-brand hover:underline"
-                  >
-                    Add a GitHub App in Sources
-                  </Link>
                 </div>
-              ) : (
-                <div className="divide-y divide-line/40">
-                  {(githubInstallations.data ?? []).map((installation) => (
-                    <button
-                      key={installation.id}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
-                      onClick={() => {
-                        setGithubInstallation(installation);
-                        setRepoSearch("");
-                        setGithubStep("repos");
-                      }}
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-[11px] font-semibold uppercase dark:bg-white/[0.08]">
-                        {installation.accountLogin.slice(0, 1)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">
-                          {installation.accountLogin}
+                <Button variant="primary" onClick={() => setNewAppOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  New GitHub App
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {(githubApps.data ?? []).map((app) => {
+                const attached = installationsFor(app.id);
+                const installUrl =
+                  app.configured && app.slug
+                    ? `${gitHubWebBase(app)}/apps/${app.slug}/installations/new?state=${app.id}`
+                    : "";
+                return (
+                  <Card key={app.id}>
+                    <CardContent className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                          <Github className="h-4 w-4" />
                         </span>
-                        <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
-                          App: {installation.appName} ·{" "}
-                          {installation.repositorySelection === "all"
-                            ? "all repositories"
-                            : "selected repositories"}
-                        </span>
-                      </span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="border-t border-line/40 px-4 py-2.5">
-                <Link
-                  to="/sources"
-                  className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add GitHub App
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-[13px] font-medium">{app.name}</span>
+                            {app.configured ? (
+                              <span className="rounded-full bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok">
+                                App ID {app.appId}
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                                Setup incomplete
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                            {app.configured && app.slug
+                              ? `${gitHubWebBase(app).replace("https://", "")}/apps/${app.slug}`
+                              : "Register the app with GitHub to finish"}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {!app.configured ? (
+                            <Link to="/sources/$appId" params={{ appId: app.id }}>
+                              <Button variant="neutral" size="sm">
+                                Finish setup
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              </Button>
+                            </Link>
+                          ) : installUrl !== "" && attached.length === 0 ? (
+                            <a href={installUrl} target="_blank" rel="noreferrer">
+                              <Button variant="neutral" size="sm">
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                Install on GitHub
+                              </Button>
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 border-t border-line/40 pt-2">
+                        {githubInstallations.isLoading ? (
+                          <p className="text-[11px] text-black/45 dark:text-white/40">
+                            Loading installations…
+                          </p>
+                        ) : githubInstallations.isError ? (
+                          <p className="text-[11px] text-danger">
+                            {errorText(githubInstallations.error)}
+                          </p>
+                        ) : attached.length === 0 ? (
+                          <p className="text-[11px] text-black/50 dark:text-white/45">
+                            {app.configured
+                              ? installUrl !== ""
+                                ? "Not installed on any account yet — press Install, grant access on GitHub, then Refresh."
+                                : "Not installed on any account yet — open this source in Sources to install it."
+                              : "Finish the setup to install it on your GitHub account."}
+                          </p>
+                        ) : (
+                          <div className="space-y-1">
+                            {attached.map((installation) => (
+                              <button
+                                key={installation.id}
+                                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                                onClick={() => {
+                                  setGithubInstallation(installation);
+                                  setRepoSearch("");
+                                  setGithubStep("repos");
+                                }}
+                              >
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-[10px] font-semibold uppercase dark:bg-white/[0.08]">
+                                  {installation.accountLogin.slice(0, 1)}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[12.5px] font-medium">
+                                    {installation.accountLogin}
+                                  </span>
+                                  <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
+                                    {installation.accountType === "Organization"
+                                      ? "Organization"
+                                      : "User"}{" "}
+                                    ·{" "}
+                                    {installation.repositorySelection === "all"
+                                      ? "all repositories"
+                                      : "selected repositories"}
+                                  </span>
+                                </span>
+                                <span className="hidden shrink-0 text-[11px] text-black/35 sm:block dark:text-white/30">
+                                  Choose a repository
+                                </span>
+                                <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </>
       ) : githubStep === "repos" ? (
         <>
@@ -1107,6 +1210,8 @@ export function ProjectDetailPage() {
           </div>
         )}
       </Modal>
+
+      <GitHubAppDialog open={newAppOpen} onClose={() => setNewAppOpen(false)} />
     </>
   );
 }
