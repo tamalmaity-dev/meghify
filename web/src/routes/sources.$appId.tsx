@@ -137,6 +137,12 @@ export function SourceDetailPage() {
         actions={
           source.configured ? (
             <>
+              {attached.length > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                  <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+                  Connected
+                </span>
+              )}
               <Button variant="neutral" onClick={() => sync.mutate()} disabled={sync.isPending}>
                 <RefreshCw className={sync.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
                 Refresh
@@ -253,6 +259,77 @@ export function SourceDetailPage() {
         </div>
       ) : (
         <div className="space-y-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>General</CardTitle>
+              {source.slug && (
+                <a
+                  href={`${base}/apps/${source.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+                >
+                  App settings on GitHub
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Organization</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 text-[11.5px] text-black/70 dark:text-white/65">
+                    {source.organization || "Personal account"}
+                  </div>
+                </div>
+                <div>
+                  <Label>App ID</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                    {source.appId}
+                  </div>
+                </div>
+                <div>
+                  <Label>Installation ID</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                    {attached.length > 0
+                      ? attached.map((installation) => installation.installationId).join(", ")
+                      : "—"}
+                  </div>
+                </div>
+                <div>
+                  <Label>Client ID</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                    {source.clientId || "—"}
+                  </div>
+                </div>
+                <div>
+                  <Label>HTML URL</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                    {base}
+                  </div>
+                </div>
+                <div>
+                  <Label>API URL</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                    {source.baseUrl ? `${source.baseUrl}/api/v3` : "https://api.github.com"}
+                  </div>
+                </div>
+                <div>
+                  <Label>Webhook secret</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-black/50 dark:text-white/45">
+                    •••••••••••• <span className="text-[10.5px]">sealed</span>
+                  </div>
+                </div>
+                <div>
+                  <Label>Private key</Label>
+                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-black/50 dark:text-white/45">
+                    •••••••••••• <span className="text-[10.5px]">sealed</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Installations</CardTitle>

@@ -192,14 +192,16 @@ export function ProjectDetailPage() {
     compose: "",
     port: 3000,
     healthCheck: "/",
+    baseDirectory: "/",
   });
 
   const [dbForm, setDbForm] = useState<{ name: string; kind: string; version: string } | null>(null);
   const [credentials, setCredentials] = useState<{ user: string; password: string; port: number } | null>(null);
 
   // GitHub App flow: pick a source (GitHub App), then the account it is
-  // installed on, then a repository; the application form opens prefilled.
-  const [githubStep, setGithubStep] = useState<"apps" | "repos" | null>(null);
+  // installed on, then a repository, then its build configuration — the same
+  // steps Coolify walks through when adding a private repository.
+  const [githubStep, setGithubStep] = useState<"apps" | "repos" | "configure" | null>(null);
   const [githubInstallation, setGithubInstallation] = useState<GitHubInstallation | null>(null);
   const [githubRepo, setGithubRepo] = useState<GitHubRepository | null>(null);
   const [repoSearch, setRepoSearch] = useState("");
@@ -268,19 +270,21 @@ export function ProjectDetailPage() {
       compose: "",
       port: 3000,
       healthCheck: "/",
+      baseDirectory: "/",
     });
     setAppSource(kind);
   };
 
   /** Enter the GitHub App half of the resource chooser. */
   const beginGitHubFlow = () => {
+    setAppSource(null);
     setGithubInstallation(null);
     setGithubRepo(null);
     setRepoSearch("");
     setGithubStep("apps");
   };
 
-  /** Repository picked: open the application form prefilled with its details. */
+  /** Repository picked: continue to its build configuration, prefilled. */
   const selectGitHubRepository = (repo: GitHubRepository) => {
     setGithubRepo(repo);
     setAutoDeploy(true);
@@ -293,8 +297,10 @@ export function ProjectDetailPage() {
       compose: "",
       port: 3000,
       healthCheck: "/",
+      baseDirectory: "/",
     });
     setAppSource("github");
+    setGithubStep("configure");
   };
 
   const createApplication = useMutation({
@@ -358,6 +364,7 @@ export function ProjectDetailPage() {
           gitBranch: appForm.branch,
           buildPack: appForm.buildPack,
           dockerfile: appForm.buildPack === "dockerfile" ? appForm.dockerfilePath : "Dockerfile",
+          baseDirectory: appForm.baseDirectory.trim() || "/",
           githubInstallationId: githubInstallation?.installationId,
           repositoryFullName: githubRepo?.fullName ?? "",
           autoDeploy,
@@ -726,8 +733,10 @@ export function ProjectDetailPage() {
           </button>
 
           <PageHeader
-            title="Choose a repository"
-            description={`Repositories available to ${githubInstallation?.accountLogin ?? "your GitHub account"}.`}
+            title="Choose repository"
+            description={`Search repositories available through ${
+              githubInstallation?.appName || githubInstallation?.accountLogin || "your GitHub App"
+            }.`}
           />
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -811,6 +820,180 @@ export function ProjectDetailPage() {
                 )}
             </CardContent>
           </Card>
+        </>
+      ) : githubStep === "configure" ? (
+        <>
+          <button
+            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            onClick={() => {
+              setAppSource(null);
+              setGithubStep("repos");
+            }}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Choose repository
+          </button>
+
+          <PageHeader
+            title="Build configuration"
+            description="Choose the branch and build strategy for this application."
+          />
+
+          <div className="space-y-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Repository</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                    <Github className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[13px] font-medium">
+                        {githubRepo?.fullName}
+                      </span>
+                      {githubRepo?.private && (
+                        <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                          Private
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                      {githubRepo?.cloneUrl}
+                    </div>
+                  </div>
+                  <Button
+                    variant="neutral"
+                    size="sm"
+                    onClick={() => {
+                      setAppSource(null);
+                      setGithubStep("repos");
+                    }}
+                  >
+                    Change repository
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Build configuration</CardTitle>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!appValid || createApplication.isPending}
+                  onClick={submitApplication}
+                >
+                  Create
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="gh-name">Name</Label>
+                    <Input
+                      id="gh-name"
+                      value={appForm.name}
+                      onChange={(event) => setAppForm({ ...appForm, name: event.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="gh-branch">Branch</Label>
+                    <Input
+                      id="gh-branch"
+                      value={appForm.branch}
+                      onChange={(event) => setAppForm({ ...appForm, branch: event.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="gh-pack">Build pack</Label>
+                    <Select
+                      id="gh-pack"
+                      value={appForm.buildPack}
+                      onChange={(event) => setAppForm({ ...appForm, buildPack: event.target.value })}
+                    >
+                      {PACK_CHOICES.map((pack) => (
+                        <option key={pack.value} value={pack.value}>
+                          {pack.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="gh-base">Base directory</Label>
+                    <Input
+                      id="gh-base"
+                      value={appForm.baseDirectory}
+                      onChange={(event) =>
+                        setAppForm({ ...appForm, baseDirectory: event.target.value })
+                      }
+                      placeholder="/"
+                    />
+                  </div>
+                </div>
+
+                {appForm.buildPack === "dockerfile" && (
+                  <div>
+                    <Label htmlFor="gh-dockerfile">Dockerfile path</Label>
+                    <Input
+                      id="gh-dockerfile"
+                      value={appForm.dockerfilePath}
+                      onChange={(event) =>
+                        setAppForm({ ...appForm, dockerfilePath: event.target.value })
+                      }
+                      placeholder="Dockerfile"
+                    />
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="gh-port">Container port</Label>
+                    <Input
+                      id="gh-port"
+                      type="number"
+                      value={appForm.port}
+                      onChange={(event) =>
+                        setAppForm({ ...appForm, port: Number(event.target.value) })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="gh-health">Health check path</Label>
+                    <Input
+                      id="gh-health"
+                      value={appForm.healthCheck}
+                      onChange={(event) =>
+                        setAppForm({ ...appForm, healthCheck: event.target.value })
+                      }
+                      placeholder="/"
+                    />
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 border-t border-line/40 pt-3 text-[12px] text-black/60 dark:text-white/55">
+                  <input
+                    type="checkbox"
+                    checked={autoDeploy}
+                    onChange={(event) => setAutoDeploy(event.target.checked)}
+                  />
+                  Deploy automatically on every push to{" "}
+                  <span className="font-mono">{appForm.branch || "main"}</span>
+                </label>
+
+                {createApplication.isError && (
+                  <p className="text-[11px] text-danger">{errorText(createApplication.error)}</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </>
       ) : (
         <>
@@ -957,7 +1140,7 @@ export function ProjectDetailPage() {
       )}
 
       <Modal
-        open={appSource !== null}
+        open={appSource !== null && !(appSource === "github" && githubStep !== null)}
         onClose={() => setAppSource(null)}
         title={sourceMeta ? `Deploy ${sourceMeta.title}` : "Deploy an application"}
         description={sourceMeta?.description}

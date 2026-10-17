@@ -509,7 +509,46 @@ func (s *Server) listGitHubRepositories(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, repositories)
+	writeJSON(w, http.StatusOK, gitHubRepositoryListViewOf(repositories))
+}
+
+// gitHubRepositoryView is what the repository picker consumes. The github
+// package mirrors GitHub's own snake_case payload, so the API translates it
+// instead of leaking GitHub's field names to the browser.
+type gitHubRepositoryView struct {
+	ID            int64  `json:"id"`
+	FullName      string `json:"fullName"`
+	Private       bool   `json:"private"`
+	Archived      bool   `json:"archived"`
+	DefaultBranch string `json:"defaultBranch"`
+	CloneURL      string `json:"cloneUrl"`
+	HTMLURL       string `json:"htmlUrl"`
+	UpdatedAt     string `json:"updatedAt"`
+}
+
+type gitHubRepositoryListView struct {
+	TotalCount   int                    `json:"totalCount"`
+	Repositories []gitHubRepositoryView `json:"repositories"`
+}
+
+func gitHubRepositoryListViewOf(list *github.RepositoryList) *gitHubRepositoryListView {
+	out := &gitHubRepositoryListView{
+		TotalCount:   list.TotalCount,
+		Repositories: make([]gitHubRepositoryView, 0, len(list.Repositories)),
+	}
+	for _, repository := range list.Repositories {
+		out.Repositories = append(out.Repositories, gitHubRepositoryView{
+			ID:            repository.ID,
+			FullName:      repository.FullName,
+			Private:       repository.Private,
+			Archived:      repository.Archived,
+			DefaultBranch: repository.DefaultBranch,
+			CloneURL:      repository.CloneURL,
+			HTMLURL:       repository.HTMLURL,
+			UpdatedAt:     repository.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // --- webhook ---

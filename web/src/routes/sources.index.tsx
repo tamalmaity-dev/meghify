@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Github, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, Github, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/app-shell";
 import { GitHubAppDialog } from "@/components/github-app-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { GitHubApp, GitHubInstallation } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -25,6 +26,7 @@ export function SourcesPage() {
   const queryClient = useQueryClient();
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState("");
 
   // The manifest and installation flows bounce the browser back here with a
   // result in the query string; surface it once, then clean the URL.
@@ -73,7 +75,9 @@ export function SourcesPage() {
     onError: (error) => toast.error(errorText(error)),
   });
 
-  const list = apps.data ?? [];
+  const all = apps.data ?? [];
+  const query = sourceSearch.trim().toLowerCase();
+  const list = all.filter((app) => query === "" || app.name.toLowerCase().includes(query));
   const installationsFor = (appId: string) =>
     (installations.data ?? []).filter((installation) => installation.githubAppId === appId);
 
@@ -87,7 +91,7 @@ export function SourcesPage() {
             <Button
               variant="neutral"
               onClick={() => sync.mutate()}
-              disabled={sync.isPending || list.length === 0}
+              disabled={sync.isPending || all.length === 0}
               title="Refresh installations from GitHub"
             >
               <RefreshCw className={sync.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
@@ -101,7 +105,7 @@ export function SourcesPage() {
         }
       />
 
-      {list.length === 0 ? (
+      {all.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <span className="flex h-10 w-10 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
@@ -121,104 +125,138 @@ export function SourcesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {list.map((app) => {
-            const attached = installationsFor(app.id);
-            return (
-              <Card key={app.id}>
-                <CardContent className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
-                      <Github className="h-4 w-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-[13px] font-medium">{app.name}</span>
-                        {app.configured ? (
-                          <span className="rounded-full bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok">
-                            App ID {app.appId}
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="relative min-w-56 flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Input
+                value={sourceSearch}
+                onChange={(event) => setSourceSearch(event.target.value)}
+                placeholder="Search sources"
+                className="pl-8"
+              />
+            </div>
+            <span className="text-[11px] text-black/40 dark:text-white/35">
+              {all.length === 1 ? "1 source" : `${all.length} sources`}
+            </span>
+          </div>
+
+          {list.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                No source matches that search.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {list.map((app) => {
+                const attached = installationsFor(app.id);
+                const connected = app.configured && attached.length > 0;
+                return (
+                  <Card key={app.id}>
+                    <CardContent className="flex h-full flex-col px-4 py-3.5">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                          <Github className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <Link
+                            to="/sources/$appId"
+                            params={{ appId: app.id }}
+                            className="block truncate text-[13px] font-medium hover:underline"
+                          >
+                            {app.name}
+                          </Link>
+                          <div className="mt-0.5 truncate text-[11px] text-black/45 dark:text-white/40">
+                            GitHub · {webBase(app).replace("https://", "")}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {connected ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                            <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+                            Connected
+                          </span>
+                        ) : app.configured ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/10 px-2 py-0.5 text-[10.5px] font-medium text-warn">
+                            <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+                            Not installed
                           </span>
                         ) : (
-                          <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/10 px-2 py-0.5 text-[10.5px] font-medium text-warn">
+                            <span className="h-1.5 w-1.5 rounded-full bg-warn" />
                             Setup incomplete
                           </span>
                         )}
-                      </div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
-                        {app.configured && app.slug
-                          ? `${webBase(app).replace("https://", "")}/apps/${app.slug}`
-                          : "Register the app with GitHub to finish"}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {app.configured && app.slug && (
-                        <a
-                          href={`${webBase(app)}/apps/${app.slug}/installations/new?state=${app.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <Button variant="neutral" size="sm">
-                            Install
-                          </Button>
-                        </a>
-                      )}
-                      <Link to="/sources/$appId" params={{ appId: app.id }}>
-                        <Button variant="neutral" size="sm">
-                          Setup
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Button>
-                      </Link>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Remove source"
-                        disabled={remove.isPending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Remove "${app.name}" from Meghify? Applications keep deploying, but automatic deploys stop. The app on GitHub is not deleted.`,
-                            )
-                          ) {
-                            remove.mutate(app.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 border-t border-line/40 pt-2 text-[11px] text-black/50 dark:text-white/45">
-                    {attached.length === 0 ? (
-                      app.configured ? (
-                        "Not installed on any account yet — press Install to pick repositories."
-                      ) : (
-                        "Finish the setup to install it on your GitHub account."
-                      )
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-black/40 dark:text-white/35">Installed on</span>
-                        {attached.map((installation) => (
-                          <span
-                            key={installation.id}
-                            className="rounded-md bg-black/[0.05] px-1.5 py-0.5 font-mono text-[10.5px] dark:bg-white/[0.06]"
-                          >
-                            {installation.accountLogin}
-                            <span className="text-black/40 dark:text-white/35">
-                              {installation.repositorySelection === "all"
-                                ? " · all repositories"
-                                : " · selected repositories"}
-                            </span>
+                        {app.configured && (
+                          <span className="font-mono text-[10px] text-black/40 dark:text-white/30">
+                            App ID {app.appId}
                           </span>
-                        ))}
+                        )}
                       </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+
+                      <p className="mt-2 flex-1 text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+                        {attached.length > 0
+                          ? attached
+                              .map(
+                                (installation) =>
+                                  `${installation.accountLogin} (${
+                                    installation.repositorySelection === "all"
+                                      ? "all repositories"
+                                      : "selected repositories"
+                                  })`,
+                              )
+                              .join(", ")
+                          : app.configured
+                            ? "Not installed on any account yet — press Install to pick repositories."
+                            : "Register the app with GitHub to finish setup."}
+                      </p>
+
+                      <div className="mt-3 flex items-center justify-end gap-2 border-t border-line/40 pt-2.5">
+                        {app.configured && app.slug && !connected && (
+                          <a
+                            href={`${webBase(app)}/apps/${app.slug}/installations/new?state=${app.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <Button variant="neutral" size="sm">
+                              Install
+                            </Button>
+                          </a>
+                        )}
+                        <Link to="/sources/$appId" params={{ appId: app.id }}>
+                          <Button variant="neutral" size="sm">
+                            {app.configured ? "Open" : "Finish setup"}
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Remove source"
+                          disabled={remove.isPending}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Remove "${app.name}" from Meghify? Applications keep deploying, but automatic deploys stop. The app on GitHub is not deleted.`,
+                              )
+                            ) {
+                              remove.mutate(app.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       <GitHubAppDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
