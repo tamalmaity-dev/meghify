@@ -206,6 +206,75 @@ func (d *Dialer) Run(ctx context.Context, command string, sink func(string)) err
 	}
 }
 
+// Shell is an interactive pty session on a node.
+type Shell struct {
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
+}
+
+// OpenShell starts an interactive login shell over SSH with a pty attached.
+// Reads are the shell's output, writes are its input, and Resize follows the
+// browser's terminal dimensions.
+func (d *Dialer) OpenShell(ctx context.Context, rows, cols uint) (*Shell, error) {
+	client, err := d.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("ssh session: %w", err)
+	}
+
+	if rows == 0 {
+		rows = 24
+	}
+	if cols == 0 {
+		cols = 80
+	}
+	modes := ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
+	if err := session.RequestPty("xterm-256color", int(rows), int(cols), modes); err != nil {
+		session.Close()
+		return nil, fmt.Errorf("request pty: %w", err)
+	}
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	// With a pty the remote shell writes stdout and stderr to the same stream.
+
+	if err := session.Shell(); err != nil {
+		session.Close()
+		return nil, fmt.Errorf("start shell: %w", err)
+	}
+	return &Shell{session: session, stdin: stdin, stdout: stdout}, nil
+}
+
+// Read returns output produced by the shell.
+func (s *Shell) Read(p []byte) (int, error) { return s.stdout.Read(p) }
+
+// Write feeds input to the shell.
+func (s *Shell) Write(p []byte) (int, error) { return s.stdin.Write(p) }
+
+// Resize updates the pty window to match the browser terminal.
+func (s *Shell) Resize(rows, cols uint) error {
+	if rows == 0 || cols == 0 {
+		return nil
+	}
+	return s.session.WindowChange(int(rows), int(cols))
+}
+
+// Close ends the shell session.
+func (s *Shell) Close() error { return s.session.Close() }
+
 // UploadString writes content to a remote path using a shell heredoc.
 func (d *Dialer) UploadString(ctx context.Context, content, path string, mode os.FileMode) error {
 	script := fmt.Sprintf("cat > %s <<'PASS_EOF'\n%s\nPASS_EOF\nchmod %o %s\n",

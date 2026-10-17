@@ -11,15 +11,24 @@ import (
 // NodeRepo persists servers and their metric samples.
 type NodeRepo struct{ db *sql.DB }
 
+// LocalNodeID is the singleton row describing the machine the panel runs on.
+// It is created automatically and cannot be removed from the panel.
+const LocalNodeID = "local"
+
+// LocalNodeDescription explains the protected default server wherever it is
+// rendered.
+const LocalNodeDescription = "This is the server where Meghify is running on. Don't remove it!"
+
 // CreateNode inserts a server record in the pending state.
 func (r *NodeRepo) CreateNode(ctx context.Context, n *Node) error {
 	now := Text(time.Now().UTC())
-	q := `INSERT INTO nodes (id, name, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
-	                         cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	q := `INSERT INTO nodes (id, name, description, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
+	                         arch, cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
-		n.ID, n.Name, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status, n.OS, n.Kernel,
-		n.CPUs, n.MemoryBytes, n.DockerVersion, TextOptional(n.LastSeenAt), n.ErrorMessage, now, now,
+		n.ID, n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status,
+		n.OS, n.Kernel, n.Arch, n.CPUs, n.MemoryBytes, n.DockerVersion, TextOptional(n.LastSeenAt),
+		n.ErrorMessage, now, now,
 	); err != nil {
 		return fmt.Errorf("insert node: %w", err)
 	}
@@ -33,39 +42,51 @@ func (r *NodeRepo) CreateNode(ctx context.Context, n *Node) error {
 func (r *NodeRepo) EnsureLocalNode(ctx context.Context) error {
 	now := Text(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO nodes (id, name, address, status, created_at, updated_at)
-		 VALUES ('local', 'This server', 'localhost', ?, ?, ?)
-		 ON CONFLICT (id) DO NOTHING`, NodeOnline, now, now)
+		`INSERT INTO nodes (id, name, description, address, status, created_at, updated_at)
+		 VALUES ('local', 'This server', ?, 'localhost', ?, ?, ?)
+		 ON CONFLICT (id) DO NOTHING`, LocalNodeDescription, NodeOnline, now, now)
 	if err != nil {
 		return fmt.Errorf("ensure local node: %w", err)
 	}
 	return nil
 }
 
-// UpdateLocalNodeInfo refreshes the discoverable hardware facts of the local
+// UpdateLocalNodeFacts refreshes the discoverable hardware facts of the local
 // node so the servers list and dashboard show real numbers instead of empty
-// fields. It also marks the row as seen now.
-func (r *NodeRepo) UpdateLocalNodeInfo(ctx context.Context, osName, kernel string, cpus int, memoryBytes int64) error {
+// fields. It also marks the row as seen now. Empty strings and a nil boot time
+// leave the stored value alone, so a temporarily unreachable engine does not
+// wipe facts that were already discovered.
+func (r *NodeRepo) UpdateLocalNodeFacts(ctx context.Context, osName, kernel, arch, dockerVersion string, cpus int, memoryBytes int64, bootTime *time.Time) error {
 	now := Text(time.Now().UTC())
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE nodes SET os = ?, kernel = ?, cpus = ?, memory_bytes = ?, last_seen_at = ?, updated_at = ?
-		  WHERE id = 'local'`,
-		osName, kernel, cpus, memoryBytes, now, now)
+		`UPDATE nodes SET
+		    os = COALESCE(NULLIF(?, ''), os),
+		    kernel = COALESCE(NULLIF(?, ''), kernel),
+		    arch = COALESCE(NULLIF(?, ''), arch),
+		    docker_version = COALESCE(NULLIF(?, ''), docker_version),
+		    cpus = CASE WHEN ? > 0 THEN ? ELSE cpus END,
+		    memory_bytes = CASE WHEN ? > 0 THEN ? ELSE memory_bytes END,
+		    boot_time = COALESCE(?, boot_time),
+		    last_seen_at = ?, updated_at = ?
+		  WHERE id = ?`,
+		osName, kernel, arch, dockerVersion,
+		cpus, cpus, memoryBytes, memoryBytes,
+		TextOptional(bootTime), now, now, LocalNodeID)
 	if err != nil {
-		return fmt.Errorf("update local node info: %w", err)
+		return fmt.Errorf("update local node facts: %w", err)
 	}
 	return nil
 }
 
-const nodeColumns = `id, name, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
-                     cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at`
+const nodeColumns = `id, name, description, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
+                     arch, cpus, memory_bytes, docker_version, boot_time, last_seen_at, error_message, created_at, updated_at`
 
 func (r *NodeRepo) scanNode(scanner interface{ Scan(...any) error }) (*Node, error) {
 	var n Node
-	var sshKeyID, lastSeen, createdAt, updatedAt sql.NullString
-	err := scanner.Scan(&n.ID, &n.Name, &n.Address, &n.SSHPort, &n.SSHUser, &sshKeyID,
-		&n.Status, &n.OS, &n.Kernel, &n.CPUs, &n.MemoryBytes, &n.DockerVersion,
-		&lastSeen, &n.ErrorMessage, &createdAt, &updatedAt)
+	var sshKeyID, bootTime, lastSeen, createdAt, updatedAt sql.NullString
+	err := scanner.Scan(&n.ID, &n.Name, &n.Description, &n.Address, &n.SSHPort, &n.SSHUser, &sshKeyID,
+		&n.Status, &n.OS, &n.Kernel, &n.Arch, &n.CPUs, &n.MemoryBytes, &n.DockerVersion,
+		&bootTime, &lastSeen, &n.ErrorMessage, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, ErrNotFound
@@ -73,6 +94,7 @@ func (r *NodeRepo) scanNode(scanner interface{ Scan(...any) error }) (*Node, err
 		return nil, err
 	}
 	n.SSHKeyID = nullString(sshKeyID)
+	n.BootTime = optionalTime(bootTime)
 	n.LastSeenAt = optionalTime(lastSeen)
 	n.CreatedAt, n.UpdatedAt = Parse(nullString(createdAt)), Parse(nullString(updatedAt))
 	return &n, nil
@@ -110,26 +132,49 @@ func (r *NodeRepo) ListNodes(ctx context.Context) ([]*Node, error) {
 // UpdateNode writes the full mutable node record.
 func (r *NodeRepo) UpdateNode(ctx context.Context, n *Node) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE nodes SET name = ?, address = ?, ssh_port = ?, ssh_user = ?, ssh_key_id = ?, status = ?,
-		                  os = ?, kernel = ?, cpus = ?, memory_bytes = ?, docker_version = ?,
-		                  last_seen_at = ?, error_message = ?, updated_at = ?
+		`UPDATE nodes SET name = ?, description = ?, address = ?, ssh_port = ?, ssh_user = ?, ssh_key_id = ?, status = ?,
+		                  os = ?, kernel = ?, arch = ?, cpus = ?, memory_bytes = ?, docker_version = ?,
+		                  boot_time = ?, last_seen_at = ?, error_message = ?, updated_at = ?
 		  WHERE id = ?`,
-		n.Name, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status,
-		n.OS, n.Kernel, n.CPUs, n.MemoryBytes, n.DockerVersion,
-		TextOptional(n.LastSeenAt), n.ErrorMessage, Text(time.Now().UTC()), n.ID)
+		n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status,
+		n.OS, n.Kernel, n.Arch, n.CPUs, n.MemoryBytes, n.DockerVersion,
+		TextOptional(n.BootTime), TextOptional(n.LastSeenAt), n.ErrorMessage, Text(time.Now().UTC()), n.ID)
 	if err != nil {
 		return err
 	}
 	return rowsAffected(res)
 }
 
-// PatchNodeState updates the reachability fields only.
-func (r *NodeRepo) PatchNodeState(ctx context.Context, id, status, osName, kernel string, cpus int, mem int64, dockerVersion, errMsg string, lastSeen time.Time) error {
+// UpdateNodeFacts refreshes the discovered hardware and engine facts of a node
+// without touching its name, connection details or status. Empty strings and a
+// nil boot time leave the stored value alone.
+func (r *NodeRepo) UpdateNodeFacts(ctx context.Context, id, osName, kernel, arch, dockerVersion string, cpus int, memory int64, bootTime *time.Time, lastSeen time.Time) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE nodes SET status = ?, os = ?, kernel = ?, cpus = ?, memory_bytes = ?, docker_version = ?,
-		                  last_seen_at = ?, error_message = ?, updated_at = ?
+		`UPDATE nodes SET
+		    os = COALESCE(NULLIF(?, ''), os),
+		    kernel = COALESCE(NULLIF(?, ''), kernel),
+		    arch = COALESCE(NULLIF(?, ''), arch),
+		    docker_version = COALESCE(NULLIF(?, ''), docker_version),
+		    cpus = CASE WHEN ? > 0 THEN ? ELSE cpus END,
+		    memory_bytes = CASE WHEN ? > 0 THEN ? ELSE memory_bytes END,
+		    boot_time = COALESCE(?, boot_time),
+		    last_seen_at = ?, updated_at = ?
 		  WHERE id = ?`,
-		status, osName, kernel, cpus, mem, dockerVersion, Text(lastSeen), errMsg, Text(time.Now().UTC()), id)
+		osName, kernel, arch, dockerVersion,
+		cpus, cpus, memory, memory,
+		TextOptional(bootTime), Text(lastSeen), Text(time.Now().UTC()), id)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
+// UpdateNodeStatus moves a node between lifecycle states and records why, if
+// the move is into an error state.
+func (r *NodeRepo) UpdateNodeStatus(ctx context.Context, id, status, errMsg string, lastSeen time.Time) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE nodes SET status = ?, error_message = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`,
+		status, errMsg, Text(lastSeen), Text(time.Now().UTC()), id)
 	if err != nil {
 		return err
 	}

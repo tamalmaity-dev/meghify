@@ -57,6 +57,13 @@ type Config struct {
 
 	DockerHost string `env:"DOCKER_HOST" envDefault:"unix:///var/run/docker.sock"`
 
+	// BuildHelperImage is the container image that runs git, buildpack
+	// (nixpacks/railpack) and compose commands during a deployment. It needs
+	// git, the buildpack binaries and the docker CLI, and it talks to the same
+	// engine through the mounted socket. Keeping those tools out of the panel
+	// is what lets the panel itself run from a distroless image.
+	BuildHelperImage string `env:"BUILD_HELPER_IMAGE" envDefault:"coollabsio/coolify-helper:1.0.17"`
+
 	// Registry is where built application images are pushed.
 	RegistryURL  string `env:"REGISTRY_URL" envDefault:""`
 	RegistryUser string `env:"REGISTRY_USER" envDefault:""`

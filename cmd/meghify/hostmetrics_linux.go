@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // The CPU odometer needs the previous reading to turn two kernel counters into
@@ -22,8 +23,11 @@ var (
 
 // hostSampleNow reads CPU, memory, disk and network usage from the kernel.
 func hostSampleNow() (hostSample, bool) {
-	s := hostSample{CPUs: runtime.NumCPU()}
+	s := hostSample{CPUs: runtime.NumCPU(), Arch: hostArch()}
 	s.OS, s.Kernel = hostFacts()
+	if boot, ok := readBootTime(); ok {
+		s.BootTime = boot
+	}
 
 	if idle, total, ok := readCPUStat(); ok {
 		cpuMu.Lock()
@@ -158,4 +162,35 @@ func hostFacts() (string, string) {
 		}
 	})
 	return hostOS, hostKernel
+}
+
+// readBootTime derives the boot timestamp from /proc/uptime. Inside a
+// container the kernel exposes the host's uptime, which is exactly what the
+// Server overview wants to show.
+func readBootTime() (time.Time, bool) {
+	raw, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return time.Time{}, false
+	}
+	field, _, _ := strings.Cut(strings.TrimSpace(string(raw)), " ")
+	seconds, err := strconv.ParseFloat(field, 64)
+	if err != nil || seconds < 0 {
+		return time.Time{}, false
+	}
+	return time.Now().Add(-time.Duration(seconds * float64(time.Second))).UTC(), true
+}
+
+// hostArch renders runtime.GOARCH the way uname does, so the overview card
+// reads "x86_64" and "aarch64" like every other server panel.
+func hostArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	case "arm":
+		return "armv7l"
+	default:
+		return runtime.GOARCH
+	}
 }

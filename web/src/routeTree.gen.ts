@@ -19,6 +19,8 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as ApplicationsApplicationIdRouteImport } from './routes/applications.$applicationId'
+import { Route as NodesIndexRouteImport } from './routes/nodes.index'
+import { Route as NodesNodeIdRouteImport } from './routes/nodes.$nodeId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as SourcesIndexRouteImport } from './routes/sources.index'
@@ -75,6 +77,16 @@ const ApplicationsApplicationIdRoute =
     path: '/applications/$applicationId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const NodesIndexRoute = NodesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => NodesRoute,
+} as any)
+const NodesNodeIdRoute = NodesNodeIdRouteImport.update({
+  id: '/$nodeId',
+  path: '/$nodeId',
+  getParentRoute: () => NodesRoute,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -101,14 +113,16 @@ export interface FileRoutesByFullPath {
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
-  '/nodes': typeof NodesRoute
+  '/nodes': typeof NodesRouteWithChildren
   '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sources/$appId': typeof SourcesAppIdRoute
+  '/nodes/': typeof NodesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/sources/': typeof SourcesIndexRoute
 }
@@ -117,12 +131,13 @@ export interface FileRoutesByTo {
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
-  '/nodes': typeof NodesRoute
   '/settings': typeof SettingsRoute
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sources/$appId': typeof SourcesAppIdRoute
+  '/nodes': typeof NodesIndexRoute
   '/projects': typeof ProjectsIndexRoute
   '/sources': typeof SourcesIndexRoute
 }
@@ -132,14 +147,16 @@ export interface FileRoutesById {
   '/databases': typeof DatabasesRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
-  '/nodes': typeof NodesRoute
+  '/nodes': typeof NodesRouteWithChildren
   '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
+  '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/sources/$appId': typeof SourcesAppIdRoute
+  '/nodes/': typeof NodesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/sources/': typeof SourcesIndexRoute
 }
@@ -156,8 +173,10 @@ export interface FileRouteTypes {
     | '/sources'
     | '/team'
     | '/applications/$applicationId'
+    | '/nodes/$nodeId'
     | '/projects/$projectId'
     | '/sources/$appId'
+    | '/nodes/'
     | '/projects/'
     | '/sources/'
   fileRoutesByTo: FileRoutesByTo
@@ -166,12 +185,13 @@ export interface FileRouteTypes {
     | '/databases'
     | '/jobs'
     | '/login'
-    | '/nodes'
     | '/settings'
     | '/team'
     | '/applications/$applicationId'
+    | '/nodes/$nodeId'
     | '/projects/$projectId'
     | '/sources/$appId'
+    | '/nodes'
     | '/projects'
     | '/sources'
   id:
@@ -186,8 +206,10 @@ export interface FileRouteTypes {
     | '/sources'
     | '/team'
     | '/applications/$applicationId'
+    | '/nodes/$nodeId'
     | '/projects/$projectId'
     | '/sources/$appId'
+    | '/nodes/'
     | '/projects/'
     | '/sources/'
   fileRoutesById: FileRoutesById
@@ -197,7 +219,7 @@ export interface RootRouteChildren {
   DatabasesRoute: typeof DatabasesRoute
   JobsRoute: typeof JobsRoute
   LoginRoute: typeof LoginRoute
-  NodesRoute: typeof NodesRoute
+  NodesRoute: typeof NodesRouteWithChildren
   ProjectsRoute: typeof ProjectsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   SourcesRoute: typeof SourcesRouteWithChildren
@@ -277,6 +299,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApplicationsApplicationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/nodes/': {
+      id: '/nodes/'
+      path: '/'
+      fullPath: '/nodes/'
+      preLoaderRoute: typeof NodesIndexRouteImport
+      parentRoute: typeof NodesRoute
+    }
+    '/nodes/$nodeId': {
+      id: '/nodes/$nodeId'
+      path: '/$nodeId'
+      fullPath: '/nodes/$nodeId'
+      preLoaderRoute: typeof NodesNodeIdRouteImport
+      parentRoute: typeof NodesRoute
+    }
     '/projects/': {
       id: '/projects/'
       path: '/'
@@ -307,6 +343,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface NodesRouteChildren {
+  NodesNodeIdRoute: typeof NodesNodeIdRoute
+  NodesIndexRoute: typeof NodesIndexRoute
+}
+
+const NodesRouteChildren: NodesRouteChildren = {
+  NodesNodeIdRoute: NodesNodeIdRoute,
+  NodesIndexRoute: NodesIndexRoute,
+}
+
+const NodesRouteWithChildren = NodesRoute._addFileChildren(NodesRouteChildren)
 
 interface ProjectsRouteChildren {
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
@@ -340,7 +388,7 @@ const rootRouteChildren: RootRouteChildren = {
   DatabasesRoute: DatabasesRoute,
   JobsRoute: JobsRoute,
   LoginRoute: LoginRoute,
-  NodesRoute: NodesRoute,
+  NodesRoute: NodesRouteWithChildren,
   ProjectsRoute: ProjectsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   SourcesRoute: SourcesRouteWithChildren,

@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -444,6 +445,79 @@ func (c *Client) ExecInteractive(ctx context.Context, opts ExecOptions) (*ExecSe
 	}
 
 	return &ExecSession{ID: create.ID, Conn: answer.Conn}, nil
+}
+
+// ResizeExec updates the TTY dimensions of an interactive exec session.
+func (c *Client) ResizeExec(ctx context.Context, execID string, rows, cols uint) error {
+	return c.cli.ContainerExecResize(ctx, execID, container.ResizeOptions{
+		Height: rows,
+		Width:  cols,
+	})
+}
+
+// CopyToContainer streams a tar archive into a path inside a container. It is
+// how build contexts reach helper containers without a shared filesystem.
+func (c *Client) CopyToContainer(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	if err := c.cli.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{}); err != nil {
+		return fmt.Errorf("copy to container: %w", err)
+	}
+	return nil
+}
+
+// ExecResult is a running non-interactive exec with a stream of its output.
+type ExecResult struct {
+	Output io.ReadCloser
+
+	client *Client
+	execID string
+}
+
+// Wait blocks until the exec finishes and returns its exit code.
+func (r *ExecResult) Wait(ctx context.Context) (int, error) {
+	for {
+		inspect, err := r.client.cli.ContainerExecInspect(ctx, r.execID)
+		if err != nil {
+			return -1, fmt.Errorf("exec inspect: %w", err)
+		}
+		if !inspect.Running {
+			return inspect.ExitCode, nil
+		}
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// RunExec runs a command in a container and streams its demultiplexed output.
+// The returned reader must be drained; call Wait for the exit code.
+func (c *Client) RunExec(ctx context.Context, containerID string, cmd, env []string) (*ExecResult, error) {
+	create, err := c.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("exec create: %w", err)
+	}
+
+	attach, err := c.cli.ContainerExecAttach(ctx, create.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("exec attach: %w", err)
+	}
+
+	// The hijacked stream carries stdout and stderr with 8-byte frame headers;
+	// stdcopy splits them and both are forwarded to the same pipe.
+	reader, writer := io.Pipe()
+	go func() {
+		_, err := stdcopy.StdCopy(writer, writer, attach.Reader)
+		attach.Close()
+		writer.CloseWithError(err)
+	}()
+
+	return &ExecResult{Output: reader, client: c, execID: create.ID}, nil
 }
 
 // RowsOr returns the configured terminal height, defaulting to 24.

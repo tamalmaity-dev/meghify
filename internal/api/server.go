@@ -149,10 +149,13 @@ func (s *Server) Router() http.Handler {
 			r.Get("/", s.listNodes)
 			r.Post("/", s.createNode)
 			r.Get("/{id}", s.getNode)
+			r.Patch("/{id}", s.updateNode)
 			r.Delete("/{id}", s.deleteNode)
 			r.Post("/{id}/provision", s.provisionNode)
+			r.Post("/{id}/validate", s.validateNode)
 			r.Get("/{id}/metrics", s.nodeMetrics)
 			r.Get("/{id}/containers", s.nodeContainers)
+			r.Get("/{id}/terminal", s.nodeTerminal)
 		})
 
 		r.Route("/ssh-keys", func(r chi.Router) {

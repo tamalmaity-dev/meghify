@@ -14,6 +14,14 @@ import (
 // jsonUnmarshal parses a job payload.
 func jsonUnmarshal(payload string, dst any) error { return json.Unmarshal([]byte(payload), dst) }
 
+// valueOr returns the first non-empty string.
+func valueOr(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
 // collectMetrics samples the machine the panel runs on and stores the result.
 //
 // Sampling reads the host directly (CPU, memory, disk, network), not the
@@ -21,7 +29,11 @@ func jsonUnmarshal(payload string, dst any) error { return json.Unmarshal([]byte
 // written against the "local" node id so the dashboard can render one series
 // even when no remote nodes exist yet; the matching nodes row is created and
 // kept fresh on every collection.
-func collectMetrics(ctx context.Context, store *db.Store) error {
+//
+// Hardware facts prefer the engine's report (the engine sees the real host,
+// while /proc and /etc/os-release are namespaced into the panel container);
+// the host sample is the fallback when no engine answers.
+func collectMetrics(ctx context.Context, store *db.Store, client *docker.Client) error {
 	sample, ok := hostSampleNow()
 	if !ok {
 		return nil
@@ -32,13 +44,36 @@ func collectMetrics(ctx context.Context, store *db.Store) error {
 	if err := store.Nodes.EnsureLocalNode(ctx); err != nil {
 		return err
 	}
-	if err := store.Nodes.UpdateLocalNodeInfo(ctx, sample.OS, sample.Kernel, sample.CPUs, sample.MemTotal); err != nil {
+
+	osName, kernel, arch := sample.OS, sample.Kernel, sample.Arch
+	cpus, memory := sample.CPUs, sample.MemTotal
+	dockerVersion := ""
+	if client != nil {
+		if info, err := client.Info(ctx); err == nil {
+			osName = valueOr(info.OperatingSystem, osName)
+			kernel = valueOr(info.KernelVersion, kernel)
+			arch = valueOr(info.Architecture, arch)
+			if info.NCPU > 0 {
+				cpus = info.NCPU
+			}
+			if info.MemTotal > 0 {
+				memory = info.MemTotal
+			}
+			dockerVersion = info.ServerVersion
+		}
+	}
+
+	var bootTime *time.Time
+	if !sample.BootTime.IsZero() {
+		bootTime = &sample.BootTime
+	}
+	if err := store.Nodes.UpdateLocalNodeFacts(ctx, osName, kernel, arch, dockerVersion, cpus, memory, bootTime); err != nil {
 		return err
 	}
 
 	return store.Nodes.InsertMetric(ctx, &db.NodeMetrics{
 		ID:         db.NewID(),
-		NodeID:     "local",
+		NodeID:     db.LocalNodeID,
 		CPUPercent: math.Round(sample.CPUPercent*10) / 10,
 		MemUsed:    sample.MemUsed,
 		MemTotal:   sample.MemTotal,

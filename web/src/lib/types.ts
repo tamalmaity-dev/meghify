@@ -39,6 +39,7 @@ export interface Environment {
 export interface Node {
   id: string;
   name: string;
+  description: string;
   address: string;
   sshPort: number;
   sshUser: string;
@@ -46,9 +47,11 @@ export interface Node {
   status: "pending" | "online" | "offline" | "error" | "installing";
   os: string;
   kernel: string;
+  arch: string;
   cpus: number;
   memoryBytes: number;
   dockerVersion: string;
+  bootTime?: string;
   lastSeenAt?: string;
   errorMessage?: string;
   createdAt: string;

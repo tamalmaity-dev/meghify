@@ -78,11 +78,12 @@ function usageTone(percent: number): string {
 /**
  * The machine section of the dashboard: live CPU, memory, storage and network
  * for the server the panel runs on, with an hour of history behind each chart.
+ * Pass a nodeId to render the same charts for another server.
  */
-export function SystemMetrics() {
+export function SystemMetrics({ nodeId = "local" }: { nodeId?: string }) {
   const metrics = useQuery({
-    queryKey: ["node-metrics", "local"],
-    queryFn: () => api.get<NodeMetrics[]>("/nodes/local/metrics?since=1h"),
+    queryKey: ["node-metrics", nodeId],
+    queryFn: () => api.get<NodeMetrics[]>(`/nodes/${nodeId}/metrics?since=1h`),
     refetchInterval: REFETCH_MS,
   });
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -85,6 +86,13 @@ func run() error {
 	defer handle.Close()
 	store := db.OpenStore(handle)
 
+	// The default server row backs the dashboard metrics and the Servers page.
+	// Create it at boot so a fresh panel shows it immediately instead of after
+	// the first metrics sample.
+	if err := store.Nodes.EnsureLocalNode(context.Background()); err != nil {
+		logger.Warn("ensure local node failed", "error", err)
+	}
+
 	authService := auth.NewService(store, box, cfg)
 	authMW := auth.NewMiddleware(authService, cfg)
 	hub := realtime.NewHub(200)
@@ -115,8 +123,10 @@ func run() error {
 			User: cfg.RegistryUser,
 			Pass: cfg.RegistryPass,
 		},
-		Emitter:  hub,
-		GitToken: gitHubCredential(store, authService, logger),
+		Emitter:      hub,
+		GitToken:     gitHubCredential(store, authService, logger),
+		HelperImage:  cfg.BuildHelperImage,
+		HelperSocket: dockerSocketPath(cfg.DockerHost),
 	})
 
 	runner := jobs.NewRunner(jobs.Options{
@@ -235,7 +245,7 @@ func registerJobs(
 	// samples run straight from the scheduler (see below) and never enter the
 	// queue, so the Job queue page only ever shows real work.
 	runner.Register(db.JobNodeMetrics, func(ctx context.Context, payload string) error {
-		return collectMetrics(ctx, store)
+		return collectMetrics(ctx, store, client)
 	})
 
 	runner.Register(db.JobGC, func(ctx context.Context, payload string) error {
@@ -259,7 +269,7 @@ func registerJobs(
 	// thousands of queue rows.
 	runner.StartCronScheduler()
 	runner.RegisterCronFunc("@every 15s", func(ctx context.Context) {
-		if err := collectMetrics(ctx, store); err != nil {
+		if err := collectMetrics(ctx, store, client); err != nil {
 			logger.Warn("metrics collection failed", "error", err)
 		}
 	})
@@ -274,6 +284,16 @@ func registerJobs(
 			logger.Warn("startup cleanup failed", "error", err)
 		}
 	})
+}
+
+// dockerSocketPath maps the configured docker host to the socket path helper
+// containers should bind-mount. Non-unix hosts fall back to the conventional
+// path, which is where a local engine listens either way.
+func dockerSocketPath(host string) string {
+	if strings.HasPrefix(host, "unix://") {
+		return strings.TrimPrefix(host, "unix://")
+	}
+	return "/var/run/docker.sock"
 }
 
 // gitHubCredential mints installation tokens for applications linked to a

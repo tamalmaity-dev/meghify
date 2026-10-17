@@ -156,6 +156,44 @@ func (r *Registry) Install(ctx context.Context, n *db.Node, sink func(string)) e
 	return provisioner.Install(installCtx)
 }
 
+// Dialer returns a usable SSH dialer for a node, reusing the cached one when
+// it is still alive. Unlike ClientFor it does not require the Docker engine to
+// answer, which is what interactive shells and uptime probes need.
+func (r *Registry) Dialer(ctx context.Context, n *db.Node) (*Dialer, error) {
+	if n == nil || n.ID == db.LocalNodeID || n.Address == "" {
+		return nil, fmt.Errorf("the local server has no ssh connection")
+	}
+
+	r.mu.Lock()
+	state, ok := r.states[n.ID]
+	r.mu.Unlock()
+	if ok && state.dialer != nil {
+		// Connect revalidates the underlying client with a keepalive.
+		if _, err := state.dialer.Connect(ctx); err == nil {
+			return state.dialer, nil
+		}
+		r.Forget(n.ID)
+	}
+
+	key, err := r.sshKey(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	dialer, err := NewDialer(n.Address, n.SSHPort, n.SSHUser, key)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	if state, ok := r.states[n.ID]; ok {
+		state.dialer = dialer
+	} else {
+		r.states[n.ID] = &nodeState{dialer: dialer}
+	}
+	r.mu.Unlock()
+	return dialer, nil
+}
+
 // Reachable reports whether the node's engine answers through a tunnel.
 func (r *Registry) Reachable(ctx context.Context, n *db.Node) bool {
 	client, err := r.ClientFor(ctx, n)

@@ -138,10 +138,12 @@ type SSHKey struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
-// Node is a server the panel controls through the Docker Engine API.
+// Node is a server the panel controls through the Docker Engine API. The
+// singleton "local" row describes the machine the panel itself runs on.
 type Node struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
+	Description   string     `json:"description"`
 	Address       string     `json:"address"`
 	SSHPort       int        `json:"sshPort"`
 	SSHUser       string     `json:"sshUser"`
@@ -149,9 +151,11 @@ type Node struct {
 	Status        string     `json:"status"`
 	OS            string     `json:"os"`
 	Kernel        string     `json:"kernel"`
+	Arch          string     `json:"arch"`
 	CPUs          int        `json:"cpus"`
 	MemoryBytes   int64      `json:"memoryBytes"`
 	DockerVersion string     `json:"dockerVersion"`
+	BootTime      *time.Time `json:"bootTime,omitempty"`
 	LastSeenAt    *time.Time `json:"lastSeenAt"`
 	ErrorMessage  string     `json:"errorMessage,omitempty"`
 	CreatedAt     time.Time  `json:"createdAt"`

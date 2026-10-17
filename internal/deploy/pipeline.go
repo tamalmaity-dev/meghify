@@ -49,6 +49,11 @@ type Options struct {
 	// GitToken mints a credential for an application that clones private
 	// repositories. Optional: public repositories clone anonymously.
 	GitToken GitCredentialResolver
+	// HelperImage is the container image that runs git, buildpack and compose
+	// commands on the target engine. Empty disables the helper path.
+	HelperImage string
+	// HelperSocket is the docker socket path mounted into the helper.
+	HelperSocket string
 }
 
 // Payload is the job body carried by a deploy job.
@@ -60,13 +65,15 @@ type Payload struct {
 
 // Pipeline executes deployments.
 type Pipeline struct {
-	store    *db.Store
-	secrets  SecretBox
-	client   *docker.Client
-	dataDir  string
-	registry RegistryConfig
-	emitter  Emitter
-	git      GitCredentialResolver
+	store        *db.Store
+	secrets      SecretBox
+	client       *docker.Client
+	dataDir      string
+	registry     RegistryConfig
+	emitter      Emitter
+	git          GitCredentialResolver
+	helperImage  string
+	helperSocket string
 
 	mu      sync.Mutex
 	running map[string]struct{}
@@ -75,14 +82,16 @@ type Pipeline struct {
 // NewPipeline builds a pipeline.
 func NewPipeline(opts Options) *Pipeline {
 	return &Pipeline{
-		store:    opts.Store,
-		secrets:  opts.Secrets,
-		client:   opts.Client,
-		dataDir:  opts.DataDir,
-		registry: opts.Registry,
-		emitter:  opts.Emitter,
-		git:      opts.GitToken,
-		running:  map[string]struct{}{},
+		store:        opts.Store,
+		secrets:      opts.Secrets,
+		client:       opts.Client,
+		dataDir:      opts.DataDir,
+		registry:     opts.Registry,
+		emitter:      opts.Emitter,
+		git:          opts.GitToken,
+		helperImage:  opts.HelperImage,
+		helperSocket: opts.HelperSocket,
+		running:      map[string]struct{}{},
 	}
 }
 

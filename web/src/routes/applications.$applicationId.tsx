@@ -1,17 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Github, Play, RotateCcw, Square, Terminal } from "lucide-react";
+import { Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
 import { PageHeader } from "@/components/app-shell";
+import { XTerminal } from "@/components/terminal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
-import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { Table, TableToolbar, Td, Th, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import type { Application, Deployment, Domain, EnvVar, Volume } from "@/lib/types";
+import type { Application, Deployment, Domain, EnvVar, Node, Volume } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 const SECTIONS = [
@@ -42,6 +43,9 @@ export function ApplicationDetailPage() {
   const queryClient = useQueryClient();
   const [section, setSection] = useState<Section>("general");
   const [terminalOpen, setTerminalOpen] = useState(false);
+  // Set when a history row is picked; cleared when the section changes to Logs
+  // through the nav, which then falls back to the latest deployment.
+  const [pickedDeployment, setPickedDeployment] = useState<string>();
 
   const app = useQuery({
     queryKey: ["applications", applicationId],
@@ -54,6 +58,10 @@ export function ApplicationDetailPage() {
       query.state.data?.some((d) => ["queued", "building", "pushing", "deploying"].includes(d.status))
         ? 2000
         : false,
+  });
+  const nodes = useQuery({
+    queryKey: ["nodes"],
+    queryFn: () => api.get<Node[]>("/nodes"),
   });
   const domains = useQuery({
     queryKey: ["domains", applicationId],
@@ -87,6 +95,16 @@ export function ApplicationDetailPage() {
   );
   const latest = deployments.data?.[0];
   const application = app.data;
+  const watched =
+    (pickedDeployment && deployments.data?.find((d) => d.id === pickedDeployment)) || latest;
+  const serverName = application?.nodeId
+    ? (nodes.data?.find((node) => node.id === application.nodeId)?.name ?? "remote")
+    : "localhost";
+
+  const openLogs = (deploymentID: string) => {
+    setPickedDeployment(deploymentID);
+    setSection("logs");
+  };
 
   return (
     <>
@@ -232,49 +250,16 @@ export function ApplicationDetailPage() {
             </Card>
           )}
 
-          {section === "logs" && <DeploymentLogs deploymentId={latest?.id} />}
+          {section === "logs" && (
+            <DeploymentLogs deployment={watched} serverName={serverName} />
+          )}
 
           {section === "deployments" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>History</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {(deployments.data ?? []).length === 0 ? (
-                  <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-                    No deployments yet.
-                  </p>
-                ) : (
-                  <Table
-                    head={
-                      <>
-                        <Th>Status</Th>
-                        <Th>Trigger</Th>
-                        <Th>Commit</Th>
-                        <Th align="right">Finished</Th>
-                      </>
-                    }
-                  >
-                    {(deployments.data ?? []).map((deployment) => (
-                      <Tr key={deployment.id}>
-                        <Td>
-                          <StatusBadge status={deployment.status} />
-                        </Td>
-                        <Td className="text-black/55 dark:text-white/45">{deployment.trigger}</Td>
-                        <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
-                          {deployment.commitSha?.slice(0, 8) || "-"}
-                        </Td>
-                        <Td align="right" className="text-black/45 dark:text-white/40">
-                          {deployment.finishedAt
-                            ? new Date(deployment.finishedAt).toLocaleString()
-                            : "-"}
-                        </Td>
-                      </Tr>
-                    ))}
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+            <DeploymentHistory
+              deployments={deployments.data ?? []}
+              serverName={serverName}
+              onOpen={openLogs}
+            />
           )}
         </div>
       </div>
@@ -680,12 +665,178 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Build and deployment output. Live lines arrive over SSE and are appended to the
- * stored log so a refresh never loses the tail of a build.
+ * Deployment history, Coolify-style: status, source, commit, timing and the
+ * server each build ran on. Picking a row opens its log.
  */
-function DeploymentLogs({ deploymentId }: { deploymentId?: string }) {
+function DeploymentHistory({
+  deployments,
+  serverName,
+  onOpen,
+}: {
+  deployments: Deployment[];
+  serverName: string;
+  onOpen: (deploymentID: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const list =
+    needle === ""
+      ? deployments
+      : deployments.filter((deployment) =>
+          [deployment.status, deployment.trigger, deployment.commitSha, deployment.commitMessage]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(needle)),
+        );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Deployment history</CardTitle>
+        <span className="text-[11px] text-black/40 dark:text-white/35">
+          {deployments.length === 1 ? "1 deployment" : `${deployments.length} deployments`}
+        </span>
+      </CardHeader>
+      <CardContent className="p-0">
+        <TableToolbar
+          left={
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search deployments"
+                className="pl-8"
+              />
+            </div>
+          }
+        />
+        {deployments.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            No deployments yet.
+          </p>
+        ) : list.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            No deployment matches that search.
+          </p>
+        ) : (
+          <Table
+            head={
+              <>
+                <Th>Status</Th>
+                <Th>Source</Th>
+                <Th>Commit</Th>
+                <Th>Started</Th>
+                <Th>Duration</Th>
+                <Th>Server</Th>
+              </>
+            }
+          >
+            {list.map((deployment) => (
+              <Tr key={deployment.id} onClick={() => onOpen(deployment.id)}>
+                <Td>
+                  <DeploymentStatus status={deployment.status} />
+                </Td>
+                <Td className="text-black/55 dark:text-white/45">
+                  {deployment.trigger === "webhook"
+                    ? "Webhook"
+                    : deployment.trigger.charAt(0).toUpperCase() + deployment.trigger.slice(1)}
+                </Td>
+                <Td>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 font-mono text-[11.5px]">
+                      {deployment.commitSha ? deployment.commitSha.slice(0, 7) : "—"}
+                    </span>
+                    <span className="truncate text-[11.5px] text-black/55 dark:text-white/45">
+                      {deployment.commitMessage || ""}
+                    </span>
+                  </span>
+                </Td>
+                <Td className="text-black/55 dark:text-white/45">
+                  {relativeTime(deployment.startedAt ?? deployment.queuedAt)}
+                </Td>
+                <Td className="font-mono text-[11.5px] text-black/55 dark:text-white/45">
+                  {deploymentDuration(deployment)}
+                </Td>
+                <Td className="text-black/55 dark:text-white/45">{serverName}</Td>
+              </Tr>
+            ))}
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A coloured status dot with its label, mirroring Coolify's history rows. */
+const DEPLOYMENT_TONES: Record<string, { label: string; dot: string; text: string; pulse?: boolean }> = {
+  success: { label: "Success", dot: "bg-ok", text: "text-ok" },
+  failed: { label: "Failed", dot: "bg-danger", text: "text-danger" },
+  canceled: { label: "Canceled", dot: "bg-black/30 dark:bg-white/25", text: "text-black/50 dark:text-white/45" },
+  queued: { label: "Queued", dot: "bg-warn", text: "text-warn", pulse: true },
+  building: { label: "Building", dot: "bg-brand", text: "text-brand", pulse: true },
+  pushing: { label: "Pushing", dot: "bg-brand", text: "text-brand", pulse: true },
+  deploying: { label: "Deploying", dot: "bg-brand", text: "text-brand", pulse: true },
+};
+
+function DeploymentStatus({ status }: { status: string }) {
+  const tone = DEPLOYMENT_TONES[status] ?? {
+    label: status,
+    dot: "bg-black/30 dark:bg-white/25",
+    text: "text-black/60 dark:text-white/50",
+  };
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 text-[12px] font-medium", tone.text)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", tone.dot, tone.pulse && "animate-pulse")} />
+      {tone.label}
+    </span>
+  );
+}
+
+/** "1 week ago"-style timestamps for the history table. */
+function relativeTime(value?: string): string {
+  if (!value) return "—";
+  const seconds = Math.max(0, (Date.now() - Date.parse(value)) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${Math.round(minutes)}m ago`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = hours / 24;
+  if (days < 7) return `${Math.round(days)}d ago`;
+  return new Date(value).toLocaleDateString();
+}
+
+/** Build duration, live while the deployment is still running. */
+function deploymentDuration(deployment: Deployment): string {
+  const start = deployment.startedAt ?? deployment.queuedAt;
+  if (!start) return "—";
+  const end = deployment.finishedAt ? Date.parse(deployment.finishedAt) : Date.now();
+  const seconds = Math.max(0, Math.round((end - Date.parse(start)) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes === 0) return `${rest}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+/**
+ * Build and deployment output. Live lines arrive over SSE and are appended to
+ * the stored log so a refresh never loses the tail of a build. The header
+ * carries refresh, download and find-in-logs controls like Coolify's viewer.
+ */
+function DeploymentLogs({
+  deployment,
+  serverName,
+}: {
+  deployment?: Deployment;
+  serverName: string;
+}) {
   const [lines, setLines] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [reload, setReload] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
+  const deploymentId = deployment?.id;
 
   useEffect(() => {
     setLines([]);
@@ -712,13 +863,16 @@ function DeploymentLogs({ deploymentId }: { deploymentId?: string }) {
     })();
 
     return () => controller.abort();
-  }, [deploymentId]);
+  }, [deploymentId, reload]);
+
+  const needle = query.trim().toLowerCase();
+  const matches = needle ? lines.filter((line) => line.toLowerCase().includes(needle)).length : 0;
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
-  }, [lines]);
+    if (!needle) bottom.current?.scrollIntoView({ block: "end" });
+  }, [lines, needle]);
 
-  if (!deploymentId) {
+  if (!deployment) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
@@ -728,19 +882,120 @@ function DeploymentLogs({ deploymentId }: { deploymentId?: string }) {
     );
   }
 
+  const download = () => {
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `deployment-${deployment.id.slice(0, 8)}.log`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Build output</CardTitle>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="hidden font-mono text-[11px] text-black/40 sm:block dark:text-white/35">
+            {deployment.commitSha ? deployment.commitSha.slice(0, 7) : deployment.id.slice(0, 8)} ·{" "}
+            {serverName}
+          </span>
+          <DeploymentStatus status={deployment.status} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
-        <pre className="max-h-[26rem] overflow-auto rounded-b-[8px] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-white/80">
-          {lines.join("\n")}
+        <TableToolbar
+          left={
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Find in logs"
+                className="pl-8"
+              />
+            </div>
+          }
+          right={
+            <>
+              {needle && (
+                <span className="text-[11px] text-black/45 dark:text-white/40">
+                  {matches === 1 ? "1 match" : `${matches} matches`}
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Reload the log"
+                onClick={() => setReload((value) => value + 1)}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Download the log"
+                onClick={download}
+                disabled={lines.length === 0}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          }
+        />
+        <pre className="max-h-[26rem] overflow-auto rounded-b-[8px] bg-black/40 p-3 font-mono text-[11px] leading-relaxed">
+          {lines.map((line, index) => (
+            <LogLine key={index} line={line} needle={needle} />
+          ))}
           <div ref={bottom} />
         </pre>
       </CardContent>
     </Card>
   );
+}
+
+/** One log line with Coolify-style tones and search highlighting. */
+function LogLine({ line, needle }: { line: string; needle: string }) {
+  const match = needle !== "" && line.toLowerCase().includes(needle);
+  const parts = match ? highlight(line, needle) : [line];
+  return (
+    <div className={cn(logTone(line), needle !== "" && !match && "opacity-40")}>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <mark key={index} className="rounded-sm bg-warn/40 px-0.5 text-inherit">
+            {part}
+          </mark>
+        ) : (
+          <span key={index}>{part}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
+const logTone = (line: string): string => {
+  if (line.startsWith("[x]")) return "text-danger";
+  if (line.startsWith("[ok]")) return "text-ok";
+  if (line.startsWith("[!]")) return "text-warn";
+  if (line.startsWith("[*]")) return "text-brand";
+  return "text-white/75";
+};
+
+/** Splits a line so every occurrence of the needle can be highlighted. */
+function highlight(line: string, needle: string): string[] {
+  const lower = line.toLowerCase();
+  const parts: string[] = [];
+  let index = 0;
+  for (;;) {
+    const found = lower.indexOf(needle, index);
+    if (found < 0) {
+      parts.push(line.slice(index));
+      return parts;
+    }
+    parts.push(line.slice(index, found), line.slice(found, found + needle.length));
+    index = found + needle.length;
+  }
 }
 
 function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar[] }) {
@@ -833,8 +1088,8 @@ function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar
 }
 
 /**
- * An interactive container shell over a WebSocket. This is the one place the UI
- * uses a WebSocket, because terminal input has to travel in both directions.
+ * An interactive container shell over a WebSocket, opened as a modal from the
+ * application header.
  */
 function TerminalModal({
   applicationId,
@@ -843,66 +1098,8 @@ function TerminalModal({
   applicationId: string;
   onClose: () => void;
 }) {
-  const host = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!host.current) return;
-    let disposed = false;
-    let socket: WebSocket | undefined;
-
-    (async () => {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-      ]);
-      if (disposed || !host.current) return;
-
-      const term = new Terminal({
-        cursorBlink: true,
-        fontSize: 12,
-        fontFamily: "var(--font-mono)",
-        theme: { background: "#0a0a0a", foreground: "#e5e5e5" },
-      });
-      const fit = new FitAddon();
-      term.loadAddon(fit);
-      term.open(host.current);
-      fit.fit();
-
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(
-        `${protocol}://${window.location.host}/api/applications/${applicationId}/terminal`,
-      );
-      socket.binaryType = "arraybuffer";
-
-      socket.addEventListener("open", () => term.writeln("\r\nConnected to container.\r\n"));
-      socket.addEventListener("message", (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(event.data));
-          return;
-        }
-        term.writeln(String(event.data));
-      });
-      socket.addEventListener("close", () => term.writeln("\r\nDisconnected."));
-
-      term.onData((data) => {
-        if (socket?.readyState === WebSocket.OPEN) socket.send(data);
-      });
-      term.onResize(({ rows, cols }) => {
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "resize", rows, cols }));
-        }
-      });
-
-      const onResize = () => fit.fit();
-      window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
-    })();
-
-    return () => {
-      disposed = true;
-      socket?.close();
-    };
-  }, [applicationId]);
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const url = `${protocol}://${window.location.host}/api/applications/${applicationId}/terminal`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -913,7 +1110,7 @@ function TerminalModal({
             Close
           </Button>
         </div>
-        <div ref={host} className="h-[24rem]" />
+        <XTerminal url={url} banner="\r\nConnected to container.\r\n" />
       </div>
     </div>
   );

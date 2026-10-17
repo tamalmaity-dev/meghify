@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,14 +27,103 @@ import (
 type GitCredentialResolver func(app *db.Application) (username, token string, err error)
 
 // runDockerfile builds from an explicit Dockerfile and swaps the container.
+//
+// The git clone and the image build run inside the helper container; hosts
+// that carry git and the docker CLI themselves keep the panel-local path as a
+// fallback when the helper image is unavailable.
 func (p *Pipeline) runDockerfile(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
-	workspace, err := p.prepareWorkspace(ctx, sink, app)
+	imageRef := p.imageReference(app)
+
+	if err := p.buildDockerfileInHelper(ctx, sink, app, imageRef, payload); err != nil {
+		if !errors.Is(err, errHelperUnavailable) {
+			return err
+		}
+		if hostErr := p.buildDockerfileOnHost(ctx, sink, app, imageRef, payload); hostErr != nil {
+			return fmt.Errorf("no build helper available (%v) and the local build failed: %w", err, hostErr)
+		}
+	}
+
+	if p.registry.URL != "" && p.registry.User != "" {
+		sink.Write([]byte("[3/4] pushing " + imageRef + "\n"))
+		if err := p.client.PushImage(ctx, imageRef, p.registryAuthHeader(), sink); err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+	} else {
+		sink.Write([]byte("[3/4] skipped push (no registry configured)\n"))
+	}
+
+	return p.release(ctx, sink, app, imageRef)
+}
+
+// buildDockerfileInHelper clones the repository and runs docker build inside
+// the helper container.
+func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string, payload Payload) error {
+	clone, secret, err := p.cloneURL(app)
+	if err != nil {
+		return err
+	}
+	build, err := p.newBuilder(ctx, sink, app, secret)
+	if err != nil {
+		return err
+	}
+	defer build.close(ctx)
+
+	branch := valueOrDefault(app.GitBranch, "main")
+	sink.Write([]byte("[1/4] cloning " + redactText(clone, secret) + " (" + branch + ")\n"))
+	if err := build.clone(ctx, clone, branch); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+
+	dockerfile := strings.TrimPrefix(strings.TrimSpace(app.Dockerfile), "/")
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+
+	buildArgs, err := p.buildArgs(ctx, app)
 	if err != nil {
 		return err
 	}
 
-	imageRef := p.imageReference(app)
-	sink.Write([]byte("[1/4] building " + imageRef + "\n"))
+	// Secrets stay out of the process arguments: values are exported inside
+	// the script and referenced by name with --build-arg.
+	var script strings.Builder
+	script.WriteString("set -e\n")
+	script.WriteString("cd " + shellQuote(builderContextDir(app)) + "\n")
+	for name, value := range buildArgs {
+		if !validEnvName(name) {
+			continue
+		}
+		script.WriteString("export " + name + "=" + shellQuote(*value) + "\n")
+	}
+	script.WriteString("docker build --progress=plain -f " + shellQuote(dockerfile) + " -t " + shellQuote(imageRef))
+	if payload.NoCache {
+		script.WriteString(" --no-cache --pull")
+	}
+	script.WriteString(" --label " + shellQuote("meghify.application="+app.ID))
+	script.WriteString(" --label " + shellQuote("meghify.environment="+app.EnvironmentID))
+	for name := range buildArgs {
+		if !validEnvName(name) {
+			continue
+		}
+		script.WriteString(" --build-arg " + name)
+	}
+	script.WriteString(" .\n")
+	if err := build.writeFile(ctx, "/workspace/build.sh", script.String()); err != nil {
+		return err
+	}
+
+	sink.Write([]byte("[2/4] building " + imageRef + "\n"))
+	return build.run(ctx, "sh", "/workspace/build.sh")
+}
+
+// buildDockerfileOnHost is the panel-local fallback: clone onto the panel's
+// filesystem and let the engine build from that context.
+func (p *Pipeline) buildDockerfileOnHost(ctx context.Context, sink io.Writer, app *db.Application, imageRef string, payload Payload) error {
+	workspace, err := p.prepareWorkspace(ctx, sink, app)
+	if err != nil {
+		return err
+	}
+	sink.Write([]byte("[2/4] building " + imageRef + "\n"))
 
 	buildArgs, err := p.buildArgs(ctx, app)
 	if err != nil {
@@ -53,24 +143,70 @@ func (p *Pipeline) runDockerfile(ctx context.Context, sink io.Writer, app *db.Ap
 	}, sink); err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
+	return nil
+}
+
+// runAutoBuild generates a Dockerfile with a buildpack then builds it.
+//
+// Nixpacks and Railpack both emit a Dockerfile from source detection. They run
+// inside the helper container so the panel ships neither engine; see newBuilder.
+func (p *Pipeline) runAutoBuild(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
+	imageRef := p.imageReference(app)
+
+	if err := p.buildAutoInHelper(ctx, sink, app, imageRef); err != nil {
+		if !errors.Is(err, errHelperUnavailable) {
+			return err
+		}
+		if hostErr := p.buildAutoOnHost(ctx, sink, app, imageRef); hostErr != nil {
+			return fmt.Errorf("no build helper available (%v) and the local build failed: %w", err, hostErr)
+		}
+	}
 
 	if p.registry.URL != "" && p.registry.User != "" {
-		sink.Write([]byte("[2/4] pushing " + imageRef + "\n"))
+		sink.Write([]byte("[3/4] pushing " + imageRef + "\n"))
 		if err := p.client.PushImage(ctx, imageRef, p.registryAuthHeader(), sink); err != nil {
 			return fmt.Errorf("push: %w", err)
 		}
 	} else {
-		sink.Write([]byte("[2/4] skipped push (no registry configured)\n"))
+		sink.Write([]byte("[3/4] skipped push (no registry configured)\n"))
 	}
 
 	return p.release(ctx, sink, app, imageRef)
 }
 
-// runAutoBuild generates a Dockerfile with a buildpack then builds it.
-//
-// Nixpacks and Railpack both emit a Dockerfile from source detection. Running
-// them keeps the panel small: no buildpack engine is linked into the binary.
-func (p *Pipeline) runAutoBuild(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
+// buildAutoInHelper clones the repository and runs nixpacks or railpack inside
+// the helper container.
+func (p *Pipeline) buildAutoInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string) error {
+	clone, secret, err := p.cloneURL(app)
+	if err != nil {
+		return err
+	}
+	build, err := p.newBuilder(ctx, sink, app, secret)
+	if err != nil {
+		return err
+	}
+	defer build.close(ctx)
+
+	branch := valueOrDefault(app.GitBranch, "main")
+	sink.Write([]byte("[1/4] cloning " + redactText(clone, secret) + " (" + branch + ")\n"))
+	if err := build.clone(ctx, clone, branch); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+
+	binary := "nixpacks"
+	if app.BuildPack == db.BuildRailpack {
+		binary = "railpack"
+	}
+	sink.Write([]byte("[2/4] building with " + binary + "\n"))
+	if err := build.run(ctx, binary, "build", builderContextDir(app), "--name", imageRef); err != nil {
+		return fmt.Errorf("%s build: %w", binary, err)
+	}
+	return nil
+}
+
+// buildAutoOnHost is the panel-local fallback and needs the buildpack binary
+// installed on the host that runs the panel.
+func (p *Pipeline) buildAutoOnHost(ctx context.Context, sink io.Writer, app *db.Application, imageRef string) error {
 	workspace, err := p.prepareWorkspace(ctx, sink, app)
 	if err != nil {
 		return err
@@ -84,17 +220,15 @@ func (p *Pipeline) runAutoBuild(ctx context.Context, sink io.Writer, app *db.App
 		return fmt.Errorf("%s is not installed on this node", binary)
 	}
 
-	cmd := exec.CommandContext(ctx, binary, "build", ".", "--name", p.imageReference(app))
+	cmd := exec.CommandContext(ctx, binary, "build", ".", "--name", imageRef)
 	cmd.Dir = workspace
 	cmd.Stdout = sink
 	cmd.Stderr = sink
-	cmd.Env = append(os.Environ(), "NIXPACKS_PATH="+workspace)
-	sink.Write([]byte("[1/4] running " + binary + "\n"))
+	sink.Write([]byte("[2/4] running " + binary + "\n"))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s build: %w", binary, err)
 	}
-
-	return p.release(ctx, sink, app, p.imageReference(app))
+	return nil
 }
 
 // runImage pulls a prebuilt image and releases it.
@@ -110,11 +244,44 @@ func (p *Pipeline) runImage(ctx context.Context, sink io.Writer, app *db.Applica
 	return p.release(ctx, sink, app, imageRef)
 }
 
-// runCompose deploys a Docker Compose stack through the compose CLI.
+// runCompose deploys a Docker Compose stack through the compose CLI. It runs
+// inside the helper container (which carries the compose plugin), falling back
+// to the panel host's own compose for installs without a helper.
 func (p *Pipeline) runCompose(ctx context.Context, sink io.Writer, app *db.Application) error {
 	if strings.TrimSpace(app.Dockerfile) == "" {
 		return fmt.Errorf("applications with build pack %q must store the compose definition in the dockerfile field", db.BuildCompose)
 	}
+
+	if err := p.composeInHelper(ctx, sink, app); err != nil {
+		if !errors.Is(err, errHelperUnavailable) {
+			return err
+		}
+		return p.composeOnHost(ctx, sink, app)
+	}
+	return nil
+}
+
+func (p *Pipeline) composeInHelper(ctx context.Context, sink io.Writer, app *db.Application) error {
+	build, err := p.newBuilder(ctx, sink, app, "")
+	if err != nil {
+		return err
+	}
+	defer build.close(ctx)
+
+	sink.Write([]byte("[1/2] applying compose stack\n"))
+	if err := build.writeFile(ctx, "/workspace/compose.yaml", app.Dockerfile); err != nil {
+		return err
+	}
+	command := "cd /workspace && docker compose -p " + shellQuote(sanitizeName(app.Name)) +
+		" -f /workspace/compose.yaml up -d --remove-orphans"
+	if err := build.run(ctx, "sh", "-c", command); err != nil {
+		return fmt.Errorf("compose up: %w", err)
+	}
+	sink.Write([]byte("[ok] compose stack applied\n"))
+	return nil
+}
+
+func (p *Pipeline) composeOnHost(ctx context.Context, sink io.Writer, app *db.Application) error {
 	workspace, err := p.prepareWorkspace(ctx, sink, app)
 	if err != nil {
 		return err
@@ -155,7 +322,13 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		return err
 	}
 
-	sink.Write([]byte("[3/4] creating container\n"))
+	sink.Write([]byte("[4/4] creating container\n"))
+	// The app's private network must exist before the container is created:
+	// the create call attaches it.
+	if _, err := p.client.EnsureNetwork(ctx, networkName(app), false); err != nil {
+		return fmt.Errorf("ensure network: %w", err)
+	}
+
 	containerID, err := p.client.CreateContainer(ctx, &docker.ContainerSpec{
 		Name:          app.Name,
 		Image:         imageRef,
@@ -170,10 +343,6 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 	})
 	if err != nil {
 		return err
-	}
-
-	if _, err := p.client.EnsureNetwork(ctx, networkName(app), false); err != nil {
-		sink.Write([]byte("[!] network warning: " + err.Error() + "\n"))
 	}
 
 	sink.Write([]byte("[4/4] starting container " + shortID(containerID) + "\n"))
@@ -285,14 +454,17 @@ func (p *Pipeline) gitClone(ctx context.Context, sink io.Writer, app *db.Applica
 	if err := os.MkdirAll(filepath.Dir(workdir), 0o755); err != nil {
 		return err
 	}
-	clone, err := p.cloneURL(app)
+	clone, secret, err := p.cloneURL(app)
 	if err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
 		"--branch", valueOrDefault(app.GitBranch, "main"), clone, workdir)
-	cmd.Stdout, cmd.Stderr = sink, sink
-	if err := cmd.Run(); err != nil {
+	out, flush := redactedWriter(sink, secret)
+	cmd.Stdout, cmd.Stderr = out, out
+	err = cmd.Run()
+	flush()
+	if err != nil {
 		return err
 	}
 	// The credential was minted for this clone and expires within the hour.
@@ -309,14 +481,17 @@ func (p *Pipeline) gitClone(ctx context.Context, sink io.Writer, app *db.Applica
 }
 
 func (p *Pipeline) gitFetch(ctx context.Context, sink io.Writer, app *db.Application, workdir string) error {
-	remote, err := p.cloneURL(app)
+	remote, secret, err := p.cloneURL(app)
 	if err != nil {
 		return err
 	}
 	fetch := exec.CommandContext(ctx, "git", "fetch", "--depth", "1", remote, valueOrDefault(app.GitBranch, "main"))
 	fetch.Dir = workdir
-	fetch.Stdout, fetch.Stderr = sink, sink
-	if err := fetch.Run(); err != nil {
+	out, flush := redactedWriter(sink, secret)
+	fetch.Stdout, fetch.Stderr = out, out
+	err = fetch.Run()
+	flush()
+	if err != nil {
 		return err
 	}
 
@@ -326,25 +501,64 @@ func (p *Pipeline) gitFetch(ctx context.Context, sink io.Writer, app *db.Applica
 	return reset.Run()
 }
 
+// redactedWriter wraps a sink so a credential embedded in command output is
+// never written to the deployment log. The returned flush must be called after
+// the command finishes.
+func redactedWriter(sink io.Writer, secret string) (io.Writer, func()) {
+	if secret == "" {
+		return sink, func() {}
+	}
+	redactor := &redactWriter{w: sink, secret: secret}
+	return redactor, redactor.Flush
+}
+
 // cloneURL injects credentials for private repositories. The credential is
 // minted fresh for every git operation: GitHub App installation tokens live for
 // one hour, so a token embedded at clone time would be expired by the next
-// deployment.
-func (p *Pipeline) cloneURL(app *db.Application) (string, error) {
+// deployment. The secret is returned separately so it can be redacted from
+// logs.
+func (p *Pipeline) cloneURL(app *db.Application) (clone, secret string, err error) {
 	if p.git == nil {
-		return app.GitRepository, nil
+		return app.GitRepository, "", nil
 	}
 	user, token, err := p.git(app)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if token == "" {
-		return app.GitRepository, nil
+		return app.GitRepository, "", nil
 	}
 	if !strings.Contains(app.GitRepository, "://") {
-		return fmt.Sprintf("https://%s:%s@%s", user, token, app.GitRepository), nil
+		return fmt.Sprintf("https://%s:%s@%s", user, token, app.GitRepository), token, nil
 	}
-	return strings.Replace(app.GitRepository, "://", "://"+user+":"+token+"@", 1), nil
+	return strings.Replace(app.GitRepository, "://", "://"+user+":"+token+"@", 1), token, nil
+}
+
+// builderContextDir is where the build runs inside the helper: the repository
+// root, or the configured base directory inside it.
+func builderContextDir(app *db.Application) string {
+	base := strings.Trim(strings.TrimSpace(app.BaseDirectory), "/")
+	if base == "" {
+		return "/workspace/src"
+	}
+	return "/workspace/src/" + base
+}
+
+// validEnvName reports whether a name can be exported in a shell script and is
+// accepted by --build-arg.
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, r := range name {
+		switch {
+		case r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+		case r >= '0' && r <= '9' && index > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // imageReference computes the tag used for a build.
