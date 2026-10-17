@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,13 +58,13 @@ func (p *Pipeline) runDockerfile(ctx context.Context, sink io.Writer, app *db.Ap
 }
 
 // buildDockerfileInHelper clones the repository and runs docker build inside
-// the helper container.
+// the helper container (against the build sandbox when available).
 func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string, payload Payload) error {
 	clone, secret, err := p.cloneURL(app)
 	if err != nil {
 		return err
 	}
-	build, err := p.newBuilder(ctx, sink, app, secret)
+	build, err := p.newBuilder(ctx, sink, app, secret, payload.DeploymentID, false)
 	if err != nil {
 		return err
 	}
@@ -114,7 +115,13 @@ func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, 
 	}
 
 	sink.Write([]byte("[2/4] building " + imageRef + "\n"))
-	return build.run(ctx, "sh", "/workspace/build.sh")
+	if err := build.run(ctx, "sh", "/workspace/build.sh"); err != nil {
+		return err
+	}
+	if build.sandboxed {
+		return build.transferImage(ctx, imageRef)
+	}
+	return nil
 }
 
 // buildDockerfileOnHost is the panel-local fallback: clone onto the panel's
@@ -154,7 +161,7 @@ func (p *Pipeline) buildDockerfileOnHost(ctx context.Context, sink io.Writer, ap
 func (p *Pipeline) runAutoBuild(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
 	imageRef := p.imageReference(app)
 
-	if err := p.buildAutoInHelper(ctx, sink, app, imageRef); err != nil {
+	if err := p.buildAutoInHelper(ctx, sink, app, imageRef, payload); err != nil {
 		if !errors.Is(err, errHelperUnavailable) {
 			return err
 		}
@@ -176,13 +183,13 @@ func (p *Pipeline) runAutoBuild(ctx context.Context, sink io.Writer, app *db.App
 }
 
 // buildAutoInHelper clones the repository and runs nixpacks or railpack inside
-// the helper container.
-func (p *Pipeline) buildAutoInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string) error {
+// the helper container (against the build sandbox when available).
+func (p *Pipeline) buildAutoInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string, payload Payload) error {
 	clone, secret, err := p.cloneURL(app)
 	if err != nil {
 		return err
 	}
-	build, err := p.newBuilder(ctx, sink, app, secret)
+	build, err := p.newBuilder(ctx, sink, app, secret, payload.DeploymentID, false)
 	if err != nil {
 		return err
 	}
@@ -199,10 +206,54 @@ func (p *Pipeline) buildAutoInHelper(ctx context.Context, sink io.Writer, app *d
 		binary = "railpack"
 	}
 	sink.Write([]byte("[2/4] building with " + binary + "\n"))
-	if err := build.run(ctx, binary, "build", builderContextDir(app), "--name", imageRef); err != nil {
+	args := []string{"build", builderContextDir(app), "--name", imageRef}
+	if binary == "nixpacks" {
+		env, defaulted := p.nixpacksEnv(ctx, app)
+		if defaulted != "" {
+			sink.Write([]byte("[*] nixpacks node version " + defaulted + " (set NIXPACKS_NODE_VERSION to override)\n"))
+		}
+		for _, kv := range env {
+			args = append(args, "--env", kv)
+		}
+	}
+	if err := build.run(ctx, append([]string{binary}, args...)...); err != nil {
 		return fmt.Errorf("%s build: %w", binary, err)
 	}
+	if build.sandboxed {
+		return build.transferImage(ctx, imageRef)
+	}
 	return nil
+}
+
+// nixpacksEnv assembles the `--env` values for a nixpacks build: the
+// application's build-time variables, plus a default Node version because
+// nixpacks still falls back to the end-of-life Node 18 when package.json has
+// no engines field. The application can always override with
+// NIXPACKS_NODE_VERSION.
+func (p *Pipeline) nixpacksEnv(ctx context.Context, app *db.Application) ([]string, string) {
+	buildArgs, err := p.buildArgs(ctx, app)
+	if err != nil {
+		return nil, ""
+	}
+	names := make([]string, 0, len(buildArgs))
+	for name := range buildArgs {
+		if name == "PASS_IMAGE_REF" || !validEnvName(name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]string, 0, len(names)+1)
+	defaulted := ""
+	for _, name := range names {
+		out = append(out, name+"="+*buildArgs[name])
+	}
+	if _, ok := buildArgs["NIXPACKS_NODE_VERSION"]; !ok && p.defaultNodeVersion != "" {
+		out = append(out, "NIXPACKS_NODE_VERSION="+p.defaultNodeVersion)
+		defaulted = p.defaultNodeVersion
+	}
+	return out, defaulted
 }
 
 // buildAutoOnHost is the panel-local fallback and needs the buildpack binary
@@ -247,13 +298,15 @@ func (p *Pipeline) runImage(ctx context.Context, sink io.Writer, app *db.Applica
 
 // runCompose deploys a Docker Compose stack through the compose CLI. It runs
 // inside the helper container (which carries the compose plugin), falling back
-// to the panel host's own compose for installs without a helper.
-func (p *Pipeline) runCompose(ctx context.Context, sink io.Writer, app *db.Application) error {
+// to the panel host's own compose for installs without a helper. Compose keeps
+// the host socket: `docker compose up` creates the application containers on
+// the engine that must run them, not inside the build sandbox.
+func (p *Pipeline) runCompose(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
 	if strings.TrimSpace(app.Dockerfile) == "" {
 		return fmt.Errorf("applications with build pack %q must store the compose definition in the dockerfile field", db.BuildCompose)
 	}
 
-	if err := p.composeInHelper(ctx, sink, app); err != nil {
+	if err := p.composeInHelper(ctx, sink, app, payload); err != nil {
 		if !errors.Is(err, errHelperUnavailable) {
 			return err
 		}
@@ -262,8 +315,8 @@ func (p *Pipeline) runCompose(ctx context.Context, sink io.Writer, app *db.Appli
 	return nil
 }
 
-func (p *Pipeline) composeInHelper(ctx context.Context, sink io.Writer, app *db.Application) error {
-	build, err := p.newBuilder(ctx, sink, app, "")
+func (p *Pipeline) composeInHelper(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
+	build, err := p.newBuilder(ctx, sink, app, "", payload.DeploymentID, true)
 	if err != nil {
 		return err
 	}
@@ -446,16 +499,28 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 }
 
 // runContainerCommand executes a shell command inside a container and streams
-// its output to the deployment log.
+// its output to the deployment log. The copy is context-aware so a canceled
+// deployment does not block on a running command.
 func (p *Pipeline) runContainerCommand(ctx context.Context, sink io.Writer, containerID, command string) error {
 	result, err := p.client.RunExec(ctx, containerID, []string{"sh", "-c", command}, nil)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(sink, result.Output)
-	result.Output.Close()
-	if copyErr != nil {
-		return copyErr
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(sink, result.Output)
+		result.Output.Close()
+		copyDone <- copyErr
+	}()
+	select {
+	case copyErr := <-copyDone:
+		if copyErr != nil {
+			return copyErr
+		}
+	case <-ctx.Done():
+		result.Output.Close()
+		<-copyDone
+		return ctx.Err()
 	}
 	code, err := result.Wait(ctx)
 	if err != nil {

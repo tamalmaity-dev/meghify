@@ -99,11 +99,13 @@ func (r *DeploymentRepo) PatchDeployment(ctx context.Context, id, status string)
 	return rowsAffected(res)
 }
 
-// StartDeployment marks a deployment as actively running.
+// StartDeployment marks a deployment as actively running. It only transitions
+// a queued deployment, so a cancellation that lands in the queue window is
+// never overwritten by a start.
 func (r *DeploymentRepo) StartDeployment(ctx context.Context, id, imageTag string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE deployments SET status = ?, image_tag = ?, started_at = ? WHERE id = ?`,
-		DeployBuilding, imageTag, Text(time.Now().UTC()), id)
+		`UPDATE deployments SET status = ?, image_tag = ?, started_at = ? WHERE id = ? AND status = ?`,
+		DeployBuilding, imageTag, Text(time.Now().UTC()), id, DeployQueued)
 	if err != nil {
 		return err
 	}
@@ -119,6 +121,43 @@ func (r *DeploymentRepo) FinishDeployment(ctx context.Context, id, status, errMs
 		return err
 	}
 	return rowsAffected(res)
+}
+
+// CancelInFlight marks every queued or running deployment as canceled. It runs
+// at startup after the panel was interrupted, so a killed build cannot leave a
+// deployment "running" forever (and block the next deploy), and returns the
+// affected application IDs so their status can be reconciled.
+func (r *DeploymentRepo) CancelInFlight(ctx context.Context, message string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT application_id FROM deployments WHERE status IN (?, ?, ?, ?)`,
+		DeployQueued, DeployBuilding, DeployPushing, DeployDeploying)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var appIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		appIDs = append(appIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(appIDs) == 0 {
+		return nil, nil
+	}
+
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE deployments SET status = ?, error = ?, finished_at = ? WHERE status IN (?, ?, ?, ?)`,
+		DeployCanceled, message, Text(time.Now().UTC()),
+		DeployQueued, DeployBuilding, DeployPushing, DeployDeploying); err != nil {
+		return nil, err
+	}
+	return appIDs, nil
 }
 
 // SetDeploymentLogPath stores where the build output was written.

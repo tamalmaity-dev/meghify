@@ -274,10 +274,40 @@ func (s *Server) cancelDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "deployment is not running")
 		return
 	}
+
+	// Cancel the running work first: this stops the build context and removes
+	// the helper container, so a hung build actually dies.
+	if s.pipeline != nil {
+		s.pipeline.Cancel(id)
+	}
+
 	if err := s.store.Deployments.FinishDeployment(r.Context(), id, db.DeployCanceled, "canceled by user"); err != nil {
 		mapError(w, err)
 		return
 	}
+
+	// Restore the application status: the previous container may still be
+	// serving traffic while the canceled deployment is gone.
+	if app, err := s.store.Applications.ApplicationByID(r.Context(), deployment.ApplicationID); err == nil {
+		status := db.StatusError
+		if s.docker != nil {
+			if container, err := s.docker.ContainerByName(r.Context(), app.Name); err == nil && container != nil {
+				status = db.StatusStopped
+				if container.State == "running" {
+					status = db.StatusRunning
+				}
+			}
+		}
+		_ = s.store.Applications.PatchApplicationStatus(r.Context(), app.ID, status)
+		if s.hub != nil {
+			s.hub.BroadcastApplication(app.ID, map[string]any{
+				"applicationId": app.ID,
+				"event":         "canceled",
+				"status":        status,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": db.DeployCanceled})
 }
 

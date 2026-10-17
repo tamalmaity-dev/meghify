@@ -142,6 +142,12 @@ type ContainerSpec struct {
 	MemoryLimit   int64
 	CPULimit      float64
 	Exposed       []int
+	// Privileged is required by the build sandbox: Docker-in-Docker needs its
+	// own kernel namespaces (the build never touches the host engine).
+	Privileged bool
+	// ShmSize raises /dev/shm for builder containers (bytes); zero keeps the
+	// engine default.
+	ShmSize int64
 }
 
 // Mount is a bind or named volume mapping.
@@ -215,6 +221,8 @@ func (c *Client) CreateContainer(ctx context.Context, spec *ContainerSpec) (stri
 			Binds:         binds,
 			PortBindings:  portBindings,
 			RestartPolicy: container.RestartPolicy{Name: restartPolicy(spec.RestartPolicy)},
+			Privileged:    spec.Privileged,
+			ShmSize:       spec.ShmSize,
 			Resources: container.Resources{
 				Memory:   spec.MemoryLimit,
 				NanoCPUs: int64(spec.CPULimit * 1e9),
@@ -247,6 +255,13 @@ func restartPolicy(mode container.RestartPolicyMode) container.RestartPolicyMode
 
 func containerName(name string) string {
 	return "meghify-" + sanitize(name)
+}
+
+// ManagedName is the container name the panel uses for a logical name: every
+// container carries the meghify- prefix so the panel never mistakes a foreign
+// container for one it manages.
+func ManagedName(name string) string {
+	return containerName(name)
 }
 
 func sanitize(s string) string {
@@ -337,11 +352,12 @@ func (c *Client) ContainerByName(ctx context.Context, name string) (*ContainerIn
 	return nil, nil
 }
 
-// ListContainers returns containers carrying a managed label.
+// ListContainers returns containers carrying a managed label. An empty
+// labelKey skips the extra label filter.
 func (c *Client) ListContainers(ctx context.Context, labelKey, labelValue string) ([]*ContainerInfo, error) {
 	args := filters.NewArgs(filters.Arg("label", "meghify.managed=true"))
 	if labelKey != "" {
-		args.Add(labelKey, labelValue)
+		args.Add("label", labelKey+"="+labelValue)
 	}
 	list, err := c.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
 	if err != nil {
@@ -609,6 +625,21 @@ func (c *Client) ImageExists(ctx context.Context, ref string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// LoadImage imports an image tar (optionally gzipped) into the node's image
+// store. The build sandbox uses it to copy the image it built into the engine
+// that runs the application.
+func (c *Client) LoadImage(ctx context.Context, input io.Reader) error {
+	response, err := c.cli.ImageLoad(ctx, input)
+	if err != nil {
+		return fmt.Errorf("load image: %w", err)
+	}
+	defer response.Body.Close()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		return fmt.Errorf("read load response: %w", err)
+	}
+	return nil
 }
 
 // PruneImages removes dangling images. Returns bytes reclaimed.

@@ -135,6 +135,11 @@ func run() error {
 		BuildConcurrency: cfg.BuildConcurrency,
 		BuildCPULimit:    cfg.BuildCPULimit,
 		BuildMemoryLimit: parseByteSize(cfg.BuildMemoryLimit),
+
+		SandboxMode:        cfg.BuildSandbox,
+		SandboxImage:       cfg.BuildSandboxImage,
+		DeployTimeout:      cfg.DeployTimeout,
+		DefaultNodeVersion: cfg.BuildDefaultNodeVersion,
 	})
 
 	runner := jobs.NewRunner(jobs.Options{
@@ -182,6 +187,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Reconcile what an unclean exit left behind before the queue starts:
+	// running deployments become canceled, orphaned build helpers are removed.
+	recoverCtx, recoverDone := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	deploy.RecoverInterrupted(recoverCtx, store, localClient, logger)
+	recoverDone()
 
 	runner.Start(ctx)
 

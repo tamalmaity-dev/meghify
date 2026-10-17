@@ -66,11 +66,29 @@ type Config struct {
 	// Builds are CPU-heavy; one at a time keeps a small server responsive.
 	BuildConcurrency int `env:"BUILD_CONCURRENCY" envDefault:"1"`
 
-	// BuildCPULimit caps a build helper container's CPU (fraction of one
-	// core); zero keeps the engine default. BuildMemoryLimit accepts bytes or
-	// a suffix like 512m / 2g; empty keeps the engine default.
+	// BuildCPULimit caps the build sandbox's CPU (fraction of one core).
+	// BuildMemoryLimit accepts bytes or a suffix like 512m / 2g. Zero/empty
+	// means "auto": half of the node's CPU and memory, so builds can never
+	// starve the panel and the running applications.
 	BuildCPULimit    float64 `env:"BUILD_CPU_LIMIT" envDefault:"0"`
 	BuildMemoryLimit string  `env:"BUILD_MEMORY_LIMIT"`
+
+	// BuildSandbox runs builds inside an isolated, resource-limited Docker
+	// daemon (Docker-in-Docker) so a runaway build cannot take the server down.
+	// auto falls back to the host engine when nested Docker is unavailable;
+	// on makes that an error; off disables the sandbox.
+	BuildSandbox      string `env:"BUILD_SANDBOX" envDefault:"auto"`
+	BuildSandboxImage string `env:"BUILD_SANDBOX_IMAGE" envDefault:"docker:29-dind"`
+
+	// BuildDefaultNodeVersion is passed to nixpacks when the application does
+	// not set NIXPACKS_NODE_VERSION itself. Node 18 is end-of-life, but it is
+	// still nixpacks' fallback when no engines field exists.
+	BuildDefaultNodeVersion string `env:"BUILD_DEFAULT_NODE_VERSION" envDefault:"22"`
+
+	// DeployTimeout bounds a whole deployment (queue wait excluded): build,
+	// image transfer, release and health checks. A stuck build is stopped and
+	// the deployment fails instead of holding the queue forever.
+	DeployTimeout time.Duration `env:"DEPLOY_TIMEOUT" envDefault:"30m"`
 
 	// ProxyImage is the reverse proxy (Traefik) the panel deploys on demand
 	// for applications with domains. Empty disables proxy management. Traefik
@@ -156,6 +174,14 @@ func (c *Config) validate() error {
 	}
 	if c.BuildConcurrency < 1 {
 		return errors.New("BUILD_CONCURRENCY must be at least 1")
+	}
+	switch c.BuildSandbox {
+	case "", "auto", "on", "off":
+	default:
+		return fmt.Errorf("BUILD_SANDBOX must be auto, on or off (got %q)", c.BuildSandbox)
+	}
+	if c.DeployTimeout <= 0 {
+		return errors.New("DEPLOY_TIMEOUT must be positive")
 	}
 	return nil
 }

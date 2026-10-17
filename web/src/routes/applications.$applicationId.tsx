@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -1135,6 +1135,11 @@ function DeploymentStatus({ status }: { status: string }) {
   );
 }
 
+/** In-flight deployments can be killed; terminal ones cannot. */
+function isDeploymentInFlight(status: string): boolean {
+  return status === "queued" || status === "building" || status === "pushing" || status === "deploying";
+}
+
 /** "1 week ago"-style timestamps for the history table. */
 function relativeTime(value?: string): string {
   if (!value) return "—";
@@ -1175,11 +1180,21 @@ function DeploymentLogs({
   deployment?: Deployment;
   serverName: string;
 }) {
+  const queryClient = useQueryClient();
   const [lines, setLines] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [reload, setReload] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   const deploymentId = deployment?.id;
+
+  const cancel = useMutation({
+    mutationFn: () => api.delete(`/deployments/${deploymentId}`),
+    onSuccess: async () => {
+      toast.success("Deployment canceled — the build was stopped");
+      await queryClient.invalidateQueries({ queryKey: ["deployments"] });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
 
   useEffect(() => {
     setLines([]);
@@ -1245,6 +1260,25 @@ function DeploymentLogs({
             {serverName}
           </span>
           <DeploymentStatus status={deployment.status} />
+          {isDeploymentInFlight(deployment.status) && (
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={cancel.isPending}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Kill this build? The build process is stopped, its helper container removed, and the deployment is canceled. The previous release keeps running.",
+                  )
+                ) {
+                  cancel.mutate();
+                }
+              }}
+            >
+              <Scissors className="h-3.5 w-3.5" />
+              Kill build
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="p-0">
