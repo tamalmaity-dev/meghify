@@ -226,3 +226,10 @@ finishes.
   selected resources are cleaned up.
 - The header's **Actions** menu redeploys with or without cache, restarts and
   stops the application.
+
+## See also
+
+An in-depth study of how Coolify and Dokploy build and route — proxies,
+domains, nixpacks/railpack/Dockerfile/static builds, health gating — with
+side-by-side comparisons against Meghify, lives in
+[coolify-dokploy-analysis.md](coolify-dokploy-analysis.md).
