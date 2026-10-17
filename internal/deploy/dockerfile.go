@@ -305,7 +305,10 @@ func (p *Pipeline) composeOnHost(ctx context.Context, sink io.Writer, app *db.Ap
 }
 
 // release starts the new container and retires the previous one only after the
-// replacement is healthy.
+// replacement is healthy. The new container is created under a temporary name
+// (the previous one still owns the final name), then renamed once the old
+// container is gone — the same rolling pattern, and what makes
+// redeploys work.
 func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Application, imageRef string) error {
 	runtimeEnv, err := p.envList(ctx, app.ID, false)
 	if err != nil {
@@ -322,15 +325,27 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		return err
 	}
 
-	sink.Write([]byte("[4/4] creating container\n"))
+	if len(domains) > 0 {
+		addresses := make([]string, 0, len(domains))
+		for _, domain := range domains {
+			scheme := "https"
+			if !domain.TLSEnabled {
+				scheme = "http"
+			}
+			addresses = append(addresses, scheme+"://"+domain.Host)
+		}
+		sink.Write([]byte("[*] domains: " + strings.Join(addresses, ", ") + "\n"))
+	}
+
 	// The app's private network must exist before the container is created:
 	// the create call attaches it.
 	if _, err := p.client.EnsureNetwork(ctx, networkName(app), false); err != nil {
 		return fmt.Errorf("ensure network: %w", err)
 	}
 
+	sink.Write([]byte("[4/4] creating container\n"))
 	containerID, err := p.client.CreateContainer(ctx, &docker.ContainerSpec{
-		Name:          app.Name,
+		Name:          fmt.Sprintf("%s-%d", app.Name, time.Now().Unix()),
 		Image:         imageRef,
 		Env:           runtimeEnv,
 		Labels:        proxyLabels(app, domains),
@@ -368,6 +383,12 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		sink.Write([]byte("[ok] retiring previous container\n"))
 		p.client.StopContainer(ctx, previous.ID, 20*time.Second)
 		p.client.RemoveContainer(ctx, previous.ID)
+	}
+
+	// Only one container may carry the application's name; the new one takes
+	// it after the old one is gone.
+	if err := p.client.RenameContainer(ctx, containerID, app.Name); err != nil {
+		sink.Write([]byte("[!] could not rename container: " + err.Error() + "\n"))
 	}
 
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusRunning)

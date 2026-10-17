@@ -199,7 +199,8 @@ func (s *Server) applicationLogs(w http.ResponseWriter, r *http.Request) {
 	if tail == "" {
 		tail = "500"
 	}
-	reader, err := s.docker.ContainerLogs(r.Context(), container.ID, tail, false)
+	follow := r.URL.Query().Get("follow") == "1"
+	reader, err := s.docker.ContainerLogs(r.Context(), container.ID, tail, follow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -207,6 +208,7 @@ func (s *Server) applicationLogs(w http.ResponseWriter, r *http.Request) {
 	defer reader.Close()
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	streamDockerLogs(w, reader)
 }

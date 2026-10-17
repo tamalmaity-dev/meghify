@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal } from "lucide-react";
+import { ChevronDown, Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -12,7 +12,14 @@ import { Input, Label } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { Table, TableToolbar, Td, Th, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import type { Application, Deployment, Domain, EnvVar, Node, Volume } from "@/lib/types";
+import type {
+  Application,
+  Deployment,
+  Domain,
+  EnvVar,
+  Node as ServerNode,
+  Volume,
+} from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 const SECTIONS = [
@@ -20,7 +27,8 @@ const SECTIONS = [
   { key: "domains", label: "Domains" },
   { key: "environment", label: "Environment" },
   { key: "volumes", label: "Persistent storage" },
-  { key: "logs", label: "Logs" },
+  { key: "logs", label: "Deployment logs" },
+  { key: "runtime", label: "Runtime logs" },
   { key: "deployments", label: "Deployments" },
 ] as const;
 
@@ -61,7 +69,7 @@ export function ApplicationDetailPage() {
   });
   const nodes = useQuery({
     queryKey: ["nodes"],
-    queryFn: () => api.get<Node[]>("/nodes"),
+    queryFn: () => api.get<ServerNode[]>("/nodes"),
   });
   const domains = useQuery({
     queryKey: ["domains", applicationId],
@@ -77,12 +85,14 @@ export function ApplicationDetailPage() {
   });
 
   const deploy = useMutation({
-    mutationFn: () => api.post<Deployment>(`/applications/${applicationId}/deploy`, { noCache: false }),
-    onSuccess: () => {
-      toast.success("Deployment queued");
+    mutationFn: (options: { noCache: boolean }) =>
+      api.post<Deployment>(`/applications/${applicationId}/deploy`, options),
+    onSuccess: (_created, options) => {
+      toast.success(options.noCache ? "Redeploy without cache queued" : "Deployment queued");
       queryClient.invalidateQueries({ queryKey: ["deployments", applicationId] });
       queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
     },
+    onError: (error) => toast.error(errorText(error)),
   });
 
   const runAction = (path: string) => async () => {
@@ -100,6 +110,10 @@ export function ApplicationDetailPage() {
   const serverName = application?.nodeId
     ? (nodes.data?.find((node) => node.id === application.nodeId)?.name ?? "remote")
     : "localhost";
+  // The automatic sslip.io domain is plain HTTP, so the header link follows
+  // the domain's TLS setting rather than assuming HTTPS.
+  const primaryDomain = domains.data?.find((domain) => domain.host === application?.fqdn);
+  const fqdnScheme = primaryDomain && !primaryDomain.tlsEnabled ? "http" : "https";
 
   const openLogs = (deploymentID: string) => {
     setPickedDeployment(deploymentID);
@@ -122,20 +136,21 @@ export function ApplicationDetailPage() {
             >
               <Terminal className="h-4 w-4" />
             </Button>
-            <Button variant="neutral" onClick={runAction(`/applications/${applicationId}/restart`)}>
-              <RotateCcw className="h-4 w-4" />
-              Restart
-            </Button>
+            <ActionsMenu
+              deployPending={deploy.isPending}
+              busy={Boolean(active)}
+              onRedeploy={() => deploy.mutate({ noCache: false })}
+              onRedeployNoCache={() => deploy.mutate({ noCache: true })}
+              onRestart={runAction(`/applications/${applicationId}/restart`)}
+              onStop={runAction(`/applications/${applicationId}/stop`)}
+            />
             <Button
               variant="primary"
-              onClick={() => deploy.mutate()}
+              onClick={() => deploy.mutate({ noCache: false })}
               disabled={deploy.isPending || Boolean(active)}
             >
               <Play className="h-4 w-4" />
-              Deploy
-            </Button>
-            <Button variant="ghost" size="icon" onClick={runAction(`/applications/${applicationId}/stop`)}>
-              <Square className="h-4 w-4" />
+              {latest ? "Redeploy" : "Deploy"}
             </Button>
           </>
         }
@@ -148,12 +163,12 @@ export function ApplicationDetailPage() {
         </span>
         {application?.fqdn && (
           <a
-            href={`https://${application.fqdn}`}
+            href={`${fqdnScheme}://${application.fqdn}`}
             target="_blank"
             rel="noreferrer"
             className="text-[12px] text-brand hover:underline"
           >
-            {application.fqdn}
+            {fqdnScheme}://{application.fqdn}
           </a>
         )}
         {active && <span className="text-[11px] text-warn">{active.status}…</span>}
@@ -252,6 +267,13 @@ export function ApplicationDetailPage() {
 
           {section === "logs" && (
             <DeploymentLogs deployment={watched} serverName={serverName} />
+          )}
+
+          {section === "runtime" && (
+            <RuntimeLogs
+              applicationId={applicationId}
+              running={application?.status === "running"}
+            />
           )}
 
           {section === "deployments" && (
@@ -996,6 +1018,224 @@ function highlight(line: string, needle: string): string[] {
     parts.push(line.slice(index, found), line.slice(found, found + needle.length));
     index = found + needle.length;
   }
+}
+
+/** The header's Actions dropdown, mirroring Coolify's redeploy menu. */
+function ActionsMenu({
+  deployPending,
+  busy,
+  onRedeploy,
+  onRedeployNoCache,
+  onRestart,
+  onStop,
+}: {
+  deployPending: boolean;
+  busy: boolean;
+  onRedeploy: () => void;
+  onRedeployNoCache: () => void;
+  onRestart: () => void;
+  onStop: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocumentClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentClick);
+    return () => document.removeEventListener("mousedown", onDocumentClick);
+  }, [open]);
+
+  const item =
+    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-black/[0.04] disabled:opacity-50 dark:hover:bg-white/[0.05]";
+  const run = (action: () => void) => () => {
+    setOpen(false);
+    action();
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button variant="neutral" onClick={() => setOpen((value) => !value)}>
+        Actions
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-md border border-line/70 bg-base py-1 shadow-lg">
+          <button className={item} onClick={run(onRedeploy)} disabled={deployPending || busy}>
+            <Play className="h-3.5 w-3.5" />
+            Redeploy
+          </button>
+          <button className={item} onClick={run(onRedeployNoCache)} disabled={deployPending || busy}>
+            <Play className="h-3.5 w-3.5" />
+            Redeploy (without cache)
+          </button>
+          <div className="my-1 border-t border-line/50" />
+          <button className={item} onClick={run(onRestart)}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            Restart
+          </button>
+          <button className={item} onClick={run(onStop)}>
+            <Square className="h-3.5 w-3.5" />
+            Stop
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Container stdout/stderr. The endpoint streams plain text as the process
+ * writes, so "Stream live" follows the application in real time — the
+ * counterpart to Coolify's Runtime Logs view.
+ */
+function RuntimeLogs({ applicationId, running }: { applicationId: string; running: boolean }) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [tail, setTail] = useState("500");
+  const [follow, setFollow] = useState(true);
+  const [query, setQuery] = useState("");
+  const [reload, setReload] = useState(0);
+  const [error, setError] = useState("");
+  const bottom = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setLines([]);
+    setError("");
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const response = await fetch(
+          `/api/applications/${applicationId}/logs?tail=${encodeURIComponent(tail)}${
+            follow ? "&follow=1" : ""
+          }`,
+          { credentials: "same-origin", signal: controller.signal },
+        );
+        if (!response.ok) {
+          setError(`request failed with ${response.status}`);
+          return;
+        }
+        if (!response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n");
+          buffer = parts.pop() ?? "";
+          if (parts.length > 0) setLines((current) => [...current, ...parts]);
+        }
+        if (buffer !== "") setLines((current) => [...current, buffer]);
+      } catch {
+        // Aborted on unmount or by a control change; the next effect retries.
+      }
+    })();
+    return () => controller.abort();
+  }, [applicationId, tail, follow, reload]);
+
+  const needle = query.trim().toLowerCase();
+  const matches = needle ? lines.filter((line) => line.toLowerCase().includes(needle)).length : 0;
+
+  useEffect(() => {
+    if (!needle) bottom.current?.scrollIntoView({ block: "end" });
+  }, [lines, needle]);
+
+  const download = () => {
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "runtime.log";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Runtime logs</CardTitle>
+        {!running && <span className="text-[11px] text-warn">container is not running</span>}
+      </CardHeader>
+      <CardContent className="p-0">
+        <TableToolbar
+          left={
+            <div className="relative max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Find in logs"
+                className="pl-8"
+              />
+            </div>
+          }
+          right={
+            <>
+              {needle && (
+                <span className="text-[11px] text-black/45 dark:text-white/40">
+                  {matches === 1 ? "1 match" : `${matches} matches`}
+                </span>
+              )}
+              <label className="flex items-center gap-1.5 text-[11px] text-black/55 dark:text-white/50">
+                <input
+                  type="checkbox"
+                  checked={follow}
+                  onChange={(event) => setFollow(event.target.checked)}
+                />
+                Stream live
+              </label>
+              <select
+                value={tail}
+                onChange={(event) => setTail(event.target.value)}
+                className="h-7 rounded-md bg-recessed px-1.5 text-[11px] ring-1 ring-line/70 outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="100">100 lines</option>
+                <option value="500">500 lines</option>
+                <option value="2000">2000 lines</option>
+                <option value="all">All</option>
+              </select>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Reload the log"
+                onClick={() => setReload((value) => value + 1)}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Download the log"
+                onClick={download}
+                disabled={lines.length === 0}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          }
+        />
+        <pre className="max-h-[26rem] overflow-auto rounded-b-[8px] bg-black/40 p-3 font-mono text-[11px] leading-relaxed">
+          {error !== "" && <div className="text-danger">{error}</div>}
+          {lines.length === 0 && error === "" && (
+            <div className="text-white/40">
+              {running
+                ? follow
+                  ? "Streaming — output appears as the application writes it."
+                  : "No output in the selected window."
+                : "Start the application to see runtime logs."}
+            </div>
+          )}
+          {lines.map((line, index) => (
+            <LogLine key={index} line={line} needle={needle} />
+          ))}
+          <div ref={bottom} />
+        </pre>
+      </CardContent>
+    </Card>
+  );
 }
 
 function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar[] }) {

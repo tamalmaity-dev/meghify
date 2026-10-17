@@ -270,6 +270,16 @@ func (c *Client) StartContainer(ctx context.Context, id string) error {
 	return nil
 }
 
+// RenameContainer gives a container its final managed name. It is how a
+// rolling deploy swaps the new container into the name the rest of the panel
+// (terminal, logs, restart) looks up.
+func (c *Client) RenameContainer(ctx context.Context, id, name string) error {
+	if err := c.cli.ContainerRename(ctx, id, containerName(name)); err != nil {
+		return fmt.Errorf("rename container: %w", err)
+	}
+	return nil
+}
+
 // StopContainer stops a container, waiting up to timeout for a clean exit.
 func (c *Client) StopContainer(ctx context.Context, id string, timeout time.Duration) error {
 	seconds := int(timeout.Seconds())

@@ -23,15 +23,17 @@ func readLogFile(path string) (string, error) {
 }
 
 // streamDockerLogs strips the multiplexing headers Docker adds when tty mode is
-// off, so the browser sees clean lines.
+// off, so the browser sees clean lines. It keeps any partial frame between
+// reads, which lets the same code serve a following stream.
 func streamDockerLogs(w http.ResponseWriter, reader io.ReadCloser) {
 	flusher, canFlush := w.(http.Flusher)
+	demux := &dockerLogDemuxer{}
 	buf := make([]byte, 32*1024)
 
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
-			if _, werr := w.Write(stripDockerHeaders(buf[:n])); werr != nil {
+			if werr := demux.write(w, buf[:n]); werr != nil {
 				return
 			}
 			if canFlush {
@@ -44,25 +46,35 @@ func streamDockerLogs(w http.ResponseWriter, reader io.ReadCloser) {
 	}
 }
 
-func stripDockerHeaders(chunk []byte) []byte {
-	// Non-tty streams prefix each frame with an 8 byte header:
-	// 1 byte stream id, 3 unused bytes, 4 byte big-endian frame length.
-	if len(chunk) < 8 {
-		return chunk
-	}
-	out := make([]byte, 0, len(chunk))
-	for i := 0; i+8 <= len(chunk); {
-		frameLen := int(chunk[i+4])<<24 | int(chunk[i+5])<<16 | int(chunk[i+6])<<8 | int(chunk[i+7])
-		end := i + 8 + frameLen
-		if frameLen <= 0 || end > len(chunk) {
-			// Not a multiplexed frame; pass the remainder through untouched.
-			out = append(out, chunk[i:]...)
-			return out
+// dockerLogDemuxer parses Docker's non-tty stream framing (1 byte stream id,
+// 3 unused bytes, 4 byte big-endian length) across read boundaries.
+type dockerLogDemuxer struct {
+	pending []byte
+}
+
+func (d *dockerLogDemuxer) write(w io.Writer, chunk []byte) error {
+	d.pending = append(d.pending, chunk...)
+	for {
+		if len(d.pending) < 8 {
+			return nil
 		}
-		out = append(out, chunk[i+8:end]...)
-		i = end
+		frameLen := int(d.pending[4])<<24 | int(d.pending[5])<<16 | int(d.pending[6])<<8 | int(d.pending[7])
+		looksFramed := d.pending[1] == 0 && d.pending[2] == 0 && d.pending[3] == 0 &&
+			d.pending[0] <= 2 && frameLen > 0 && frameLen <= 16<<20
+		if !looksFramed {
+			// A tty stream (or something unrelated): pass everything through.
+			_, err := w.Write(d.pending)
+			d.pending = nil
+			return err
+		}
+		if len(d.pending) < 8+frameLen {
+			return nil
+		}
+		if _, err := w.Write(d.pending[8 : 8+frameLen]); err != nil {
+			return err
+		}
+		d.pending = append(d.pending[:0], d.pending[8+frameLen:]...)
 	}
-	return out
 }
 
 // jsonEscape flattens a log file into a single SSE-safe string.
