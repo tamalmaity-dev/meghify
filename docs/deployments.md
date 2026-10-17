@@ -74,7 +74,26 @@ An application created without a domain gets one:
 `<name>-<id>.<server-ip>.sslip.io`, served over plain HTTP. sslip.io resolves
 any subdomain that carries an IP back to that IP, so the app is reachable
 immediately with no DNS work — replace it with a real domain any time from
-the application's **Domains** section.
+the application's **Domains** card.
+
+## Domains
+
+Each domain carries its own routing options, edited from the Domains card:
+
+| Option | Meaning |
+|---|---|
+| **Protocol** | `https` generates a TLS router plus a plain-HTTP companion; `http` routes plain traffic only |
+| **Internal port** | overrides the application port for this domain |
+| **Path** | a path prefix (e.g. `/api/v3`) the domain routes |
+| **Protocol redirect** | for TLS domains: send `http://` to `https://` (the app-level **Redirect HTTP to HTTPS** switch sets the default and applies to existing domains) |
+| **Search indexing** | off adds an `X-Robots-Tag: none` middleware |
+| **DNS status** | **Check All DNS** (or the row's check) resolves the host and compares it with the server's public address: *DNS matches*, *DNS mismatch* or *Not checked* |
+
+Routing labels are generated per domain in the Coolify layout — paired
+`http-<app>-<n>` / `https-<app>-<n>` routers with per-domain services, `gzip`,
+the `redirect-to-https` middleware and, when `ACME_EMAIL` is configured, the
+`letsencrypt` certificate resolver. Re-deploy the application to attach label
+changes to the running container.
 
 ## The reverse proxy
 
@@ -93,6 +112,9 @@ installs get it created here on first use.
 If the proxy cannot start (both ports taken by something else, for example),
 the deployment still succeeds and says so in the log; the application keeps
 its published ports.
+
+The proxy's entrypoints are named `http` (port 80) and `https` (port 443),
+matching the router labels.
 
 ## Credentials
 
