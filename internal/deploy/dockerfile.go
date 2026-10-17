@@ -339,9 +339,17 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 	}
 
 	// The app's private network must exist before the container is created:
-	// the create call attaches it.
+	// the create call attaches it. Applications with domains also join the
+	// shared proxy network, where the reverse proxy routes to them.
 	if _, err := p.client.EnsureNetwork(ctx, networkName(app), false); err != nil {
 		return fmt.Errorf("ensure network: %w", err)
+	}
+	networks := []string{networkName(app)}
+	if len(domains) > 0 && p.proxyImage != "" {
+		if err := p.ensureProxy(ctx, sink); err != nil {
+			sink.Write([]byte("[!] proxy unavailable, domain routing may not work: " + err.Error() + "\n"))
+		}
+		networks = append(networks, proxyNetwork)
 	}
 
 	// Find the live container once; the replacement is created under a
@@ -377,7 +385,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		Ports:         ports,
 		Exposed:       []int{app.Port},
 		Volumes:       toMounts(volumes),
-		Networks:      []string{networkName(app)},
+		Networks:      networks,
 		RestartPolicy: "unless-stopped",
 		HealthCheck:   healthCheckFor(app),
 		MemoryLimit:   app.MemoryLimit,
@@ -432,6 +440,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		}
 	}
 
+	p.store.Applications.PatchApplicationImage(ctx, app.ID, imageRef)
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusRunning)
 	return nil
 }
@@ -784,11 +793,20 @@ func healthCheckFor(app *db.Application) *container.HealthConfig {
 	}
 }
 
-func valueOrDefault(s, def string) string {
-	if strings.TrimSpace(s) == "" {
-		return def
+// valueOrDefault returns def when s is zero or whitespace.
+func valueOrDefault[T int | string](value T, def T) T {
+	var zero T
+	switch any(value).(type) {
+	case string:
+		if strings.TrimSpace(any(value).(string)) == "" {
+			return def
+		}
+	default:
+		if value == zero {
+			return def
+		}
 	}
-	return s
+	return value
 }
 
 // copyDir recursively copies a directory tree.

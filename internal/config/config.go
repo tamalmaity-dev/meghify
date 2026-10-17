@@ -72,6 +72,17 @@ type Config struct {
 	BuildCPULimit    float64 `env:"BUILD_CPU_LIMIT" envDefault:"0"`
 	BuildMemoryLimit string  `env:"BUILD_MEMORY_LIMIT"`
 
+	// ProxyImage is the reverse proxy (Traefik) the panel deploys on demand
+	// for applications with domains. Empty disables proxy management. Traefik
+	// v3.6 or newer is required: older releases default to Docker API 1.24,
+	// which Engine 29+ refuses.
+	ProxyImage string `env:"PROXY_IMAGE" envDefault:"traefik:v3.7"`
+	// ProxyHTTPPort and ProxyHTTPSPort are the host ports the proxy binds.
+	ProxyHTTPPort  int `env:"PROXY_HTTP_PORT" envDefault:"80"`
+	ProxyHTTPSPort int `env:"PROXY_HTTPS_PORT" envDefault:"443"`
+	// ACMEEmail registers the Let's Encrypt account used for TLS certificates.
+	ACMEEmail string `env:"ACME_EMAIL"`
+
 	// Registry is where built application images are pushed.
 	RegistryURL  string `env:"REGISTRY_URL" envDefault:""`
 	RegistryUser string `env:"REGISTRY_USER" envDefault:""`

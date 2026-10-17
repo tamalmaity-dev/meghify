@@ -54,6 +54,15 @@ type Options struct {
 	HelperImage string
 	// HelperSocket is the docker socket path mounted into the helper.
 	HelperSocket string
+	// ProxyImage is the reverse proxy (Traefik) deployed on demand when an
+	// application has domains. Empty disables proxy management.
+	ProxyImage string
+	// ProxyHTTPPort and ProxyHTTPSPort are the host ports the proxy binds;
+	// zero falls back to 80/443.
+	ProxyHTTPPort  int
+	ProxyHTTPSPort int
+	// ProxyEmail registers a Let's Encrypt account for TLS certificates.
+	ProxyEmail string
 	// BuildConcurrency caps concurrent builds; values below 1 mean 1.
 	BuildConcurrency int
 	// BuildCPULimit and BuildMemoryLimit bound each build helper container.
@@ -80,6 +89,10 @@ type Pipeline struct {
 	git          GitCredentialResolver
 	helperImage  string
 	helperSocket string
+	proxyImage   string
+	proxyEmail   string
+	proxyPort    int
+	proxyTLSPort int
 
 	// buildGate serialises builds so a small server finishes one deployment
 	// before the next begins.
@@ -107,6 +120,10 @@ func NewPipeline(opts Options) *Pipeline {
 		git:              opts.GitToken,
 		helperImage:      opts.HelperImage,
 		helperSocket:     opts.HelperSocket,
+		proxyImage:       opts.ProxyImage,
+		proxyEmail:       opts.ProxyEmail,
+		proxyPort:        opts.ProxyHTTPPort,
+		proxyTLSPort:     opts.ProxyHTTPSPort,
 		buildGate:        make(chan struct{}, concurrency),
 		buildCPULimit:    opts.BuildCPULimit,
 		buildMemoryLimit: opts.BuildMemoryLimit,

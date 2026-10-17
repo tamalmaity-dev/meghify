@@ -41,7 +41,7 @@ services:
       - no-new-privileges:true
 
   traefik:
-    image: traefik:${TRAEFIK_VERSION:-v3.3}
+    image: traefik:${TRAEFIK_VERSION:-v3.7}
     restart: unless-stopped
     command:
       - "--api.dashboard=false"

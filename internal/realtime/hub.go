@@ -126,8 +126,9 @@ func (h *Hub) remove(c *client) {
 // Stream handles one SSE connection.
 //
 // Channel is passed as a query parameter, e.g. /stream?channel=deployment:abc.
-// The newest events are replayed immediately so a page refresh never loses the
-// last few lines of a build.
+// The newest events are replayed immediately so a late subscriber never loses
+// the last few lines of a build; pass replay=0 to skip the replay when the
+// client already loaded the durable history (deployment logs).
 func (h *Hub) Stream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -136,6 +137,7 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channel := r.URL.Query().Get("channel")
+	replay := r.URL.Query().Get("replay") != "0"
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
@@ -153,12 +155,14 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request) {
 		h.remove(c)
 	}()
 
-	for _, e := range history {
-		if channel != "" && e.Channel != channel {
-			continue
-		}
-		if !writeEvent(w, e) {
-			return
+	if replay {
+		for _, e := range history {
+			if channel != "" && e.Channel != channel {
+				continue
+			}
+			if !writeEvent(w, e) {
+				return
+			}
 		}
 	}
 	flusher.Flush()

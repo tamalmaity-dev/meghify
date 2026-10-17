@@ -165,6 +165,18 @@ func (r *AppRepo) PatchApplicationStatus(ctx context.Context, id, status string)
 	return rowsAffected(res)
 }
 
+// PatchApplicationImage records the image tag the latest deployment produced,
+// so the UI can show what is actually running.
+func (r *AppRepo) PatchApplicationImage(ctx context.Context, id, imageTag string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE applications SET image_tag = ?, updated_at = ? WHERE id = ?`,
+		imageTag, Text(time.Now().UTC()), id)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
 // DeleteApplication removes an application.
 func (r *AppRepo) DeleteApplication(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM applications WHERE id = ?`, id)

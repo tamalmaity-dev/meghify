@@ -916,7 +916,7 @@ function DeploymentLogs({
         });
         if (response.ok) setLines((await response.text()).split("\n"));
 
-        for await (const event of streamEvents(`/api/stream?channel=deployment:${deploymentId}`, controller.signal)) {
+        for await (const event of streamEvents(`/api/stream?channel=deployment:${deploymentId}&replay=0`, controller.signal)) {
           if (event.event === "log" && typeof event.line === "string") {
             const line = event.line;
             setLines((current) => [...current, line]);
