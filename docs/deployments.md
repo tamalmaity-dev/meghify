@@ -14,9 +14,11 @@ A deployment is one durable job:
    tracked branch).
 2. **Build** an image according to the application's build pack.
 3. **Push** to the registry when one is configured (optional).
-4. **Release** — create the container with its environment variables, volumes
-   and proxy labels, start it, wait for the health check when one is set, and
-   retire the previous container only after the replacement is healthy.
+4. **Release** — a rolling swap: the replacement container is created beside
+   the running one under a temporary name, started and health-checked, the old
+   container is retired, and the new one is renamed into the application's
+   name. There is no window without a running container, and a replacement
+   that fails its health check never replaces anything.
 
 Progress streams to the deployment log (durable, replayable) and to open
 browsers over SSE.
@@ -82,5 +84,11 @@ finishes.
 - **Deployments** — a searchable history: status, source (manual or webhook),
   commit and message, when the build started, how long it took, and the server
   it ran on. Pick a row to open its log.
-- **Logs** — build output for the selected (or latest) deployment, live over
-  SSE while the build runs, with find-in-logs, download and refresh controls.
+- **Deployment logs** — build output for the selected (or latest) deployment,
+  live over SSE while the build runs, with find-in-logs, download and refresh
+  controls.
+- **Runtime logs** — the container's stdout/stderr, streaming live with
+  **Stream live**, a tail selector (100 / 500 / 2000 / all), find-in-logs and
+  download.
+- The header's **Actions** menu redeploys with or without cache, restarts and
+  stops the application.
