@@ -18,7 +18,12 @@ A deployment is one durable job:
    the running one under a temporary name, started and health-checked, the old
    container is retired, and the new one is renamed into the application's
    name. There is no window without a running container, and a replacement
-   that fails its health check never replaces anything.
+   that fails its health check never replaces anything. (An application that
+   publishes host ports must release them first, so for those the old
+   container stops just before the new one starts.)
+5. **Hooks** — when configured, the pre-deployment command runs inside the
+   previous container before the swap and the post-deployment command runs
+   inside the new one once it is live. A failing hook fails the deployment.
 
 Progress streams to the deployment log (durable, replayable) and to open
 browsers over SSE.
@@ -90,5 +95,12 @@ finishes.
 - **Runtime logs** — the container's stdout/stderr, streaming live with
   **Stream live**, a tail selector (100 / 500 / 2000 / all), find-in-logs and
   download.
+- **Networking** — the container port the proxy routes to, published
+  `hostPort:containerPort` mappings, and the container labels the next
+  deployment attaches (read-only).
+- **Runtime** — CPU and memory ceilings for the container, and the
+  pre/post-deployment command hooks.
+- **Danger zone** — deletes the application: the container is stopped and
+  removed, the configuration and history go with it, volumes stay on disk.
 - The header's **Actions** menu redeploys with or without cache, restarts and
   stops the application.
