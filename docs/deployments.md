@@ -140,7 +140,10 @@ finishes.
   deployment attaches (read-only).
 - **Runtime** — CPU and memory ceilings for the container, and the
   pre/post-deployment command hooks.
-- **Danger zone** — deletes the application: the container is stopped and
-  removed, the configuration and history go with it, volumes stay on disk.
+- **Danger zone** — a two-step delete: pick the cleanup options (volumes,
+  networks, server configuration files, Docker cleanup of unused images and
+  the builder cache), then type the resource name to confirm. The container is
+  stopped and removed, the volume records go with the application, and the
+  selected resources are cleaned up.
 - The header's **Actions** menu redeploys with or without cache, restarts and
   stops the application.

@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.5.1](0.5.1.md) | 2026-10-17 | Coolify-style two-step delete: cleanup options (volumes, networks, config, Docker cleanup) and type-the-name confirmation |
 | [0.5.0](0.5.0.md) | 2026-10-17 | Coolify-style domains: path/port per domain, HTTP→HTTPS redirects, DNS checks, per-domain Traefik routers |
 | [0.4.1](0.4.1.md) | 2026-10-17 | On-demand Traefik proxy (domains actually work), image tag recorded, no duplicated deployment logs |
 | [0.4.0](0.4.0.md) | 2026-10-17 | Application workspace: networking (ports/mappings/labels), runtime limits and lifecycle hooks, inline terminal, danger-zone delete |
