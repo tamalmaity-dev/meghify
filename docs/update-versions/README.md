@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.4.1](0.4.1.md) | 2026-10-17 | On-demand Traefik proxy (domains actually work), image tag recorded, no duplicated deployment logs |
 | [0.4.0](0.4.0.md) | 2026-10-17 | Application workspace: networking (ports/mappings/labels), runtime limits and lifecycle hooks, inline terminal, danger-zone delete |
 | [0.3.3](0.3.3.md) | 2026-10-17 | Rolling redeploys (fix), Actions menu, live Runtime logs, domain visibility |
 | [0.3.2](0.3.2.md) | 2026-10-17 | Pull retries and attestation-free helper image — reliable pulls on Docker 29's containerd store |

@@ -76,6 +76,24 @@ any subdomain that carries an IP back to that IP, so the app is reachable
 immediately with no DNS work — replace it with a real domain any time from
 the application's **Domains** section.
 
+## The reverse proxy
+
+Domains are served by a Traefik instance the panel deploys on demand: the
+first deployment of an application that has domains ensures `meghify-proxy`
+runs, joins the application to the shared `meghify` network, and attaches the
+routing labels. Docker-compose installs ship Traefik with the panel; systemd
+installs get it created here on first use.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PROXY_IMAGE` | `traefik:v3.7` | the proxy image; empty disables proxy management. Needs Traefik v3.6+ (older releases cannot talk to Docker Engine 29) |
+| `PROXY_HTTP_PORT` / `PROXY_HTTPS_PORT` | `80` / `443` | host ports the proxy binds — change them when another proxy already owns those ports |
+| `ACME_EMAIL` | empty | registers a Let's Encrypt account; without it, HTTP routing still works and HTTPS serves Traefik's fallback certificate |
+
+If the proxy cannot start (both ports taken by something else, for example),
+the deployment still succeeds and says so in the log; the application keeps
+its published ports.
+
 ## Credentials
 
 Private repositories clone with a short-lived GitHub App installation token
