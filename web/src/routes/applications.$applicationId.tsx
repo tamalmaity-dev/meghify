@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
-import { ChevronDown, Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal } from "lucide-react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { ChevronDown, Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/app-shell";
 import { XTerminal } from "@/components/terminal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { Table, TableToolbar, Td, Th, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -24,12 +24,16 @@ import { createFileRoute } from "@tanstack/react-router";
 
 const SECTIONS = [
   { key: "general", label: "General" },
+  { key: "terminal", label: "Terminal" },
   { key: "domains", label: "Domains" },
   { key: "environment", label: "Environment" },
   { key: "volumes", label: "Persistent storage" },
+  { key: "networking", label: "Networking" },
+  { key: "runtime", label: "Runtime" },
   { key: "logs", label: "Deployment logs" },
-  { key: "runtime", label: "Runtime logs" },
+  { key: "runtimeLogs", label: "Runtime logs" },
   { key: "deployments", label: "Deployments" },
+  { key: "danger", label: "Danger zone" },
 ] as const;
 
 type Section = (typeof SECTIONS)[number]["key"];
@@ -50,7 +54,6 @@ export function ApplicationDetailPage() {
   const { applicationId } = useParams({ from: "/applications/$applicationId" });
   const queryClient = useQueryClient();
   const [section, setSection] = useState<Section>("general");
-  const [terminalOpen, setTerminalOpen] = useState(false);
   // Set when a history row is picked; cleared when the section changes to Logs
   // through the nav, which then falls back to the latest deployment.
   const [pickedDeployment, setPickedDeployment] = useState<string>();
@@ -130,7 +133,7 @@ export function ApplicationDetailPage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setTerminalOpen(true)}
+              onClick={() => setSection("terminal")}
               disabled={application?.status !== "running"}
               title="Open terminal"
             >
@@ -185,6 +188,7 @@ export function ApplicationDetailPage() {
                 section === item.key
                   ? "bg-black/[0.06] font-medium text-current dark:bg-white/[0.08]"
                   : "text-black/55 hover:bg-black/[0.03] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.04]",
+                item.key === "danger" && section !== "danger" && "text-danger/80 hover:text-danger",
               )}
             >
               {item.label}
@@ -204,6 +208,7 @@ export function ApplicationDetailPage() {
                   app={application}
                   domains={domains.data ?? []}
                   onManageDomains={() => setSection("domains")}
+                  onEditNetworking={() => setSection("networking")}
                 />
                 <div className="grid gap-3 lg:grid-cols-2">
                   <BuildCard app={application} />
@@ -217,6 +222,48 @@ export function ApplicationDetailPage() {
                 </CardContent>
               </Card>
             ))}
+
+          {section === "terminal" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Terminal</CardTitle>
+                <span className="text-[11px] text-black/40 dark:text-white/35">
+                  {application?.status === "running"
+                    ? "shell inside the running container"
+                    : "container is not running"}
+                </span>
+              </CardHeader>
+              <CardContent className="p-0">
+                {application?.status === "running" ? (
+                  <div className="h-[26rem] overflow-hidden rounded-b-[8px] bg-[#0a0a0a]">
+                    <XTerminal
+                      url={`${
+                        window.location.protocol === "https:" ? "wss" : "ws"
+                      }://${window.location.host}/api/applications/${applicationId}/terminal`}
+                      className="h-full"
+                      banner="\r\nConnected to container.\r\n"
+                    />
+                  </div>
+                ) : (
+                  <p className="px-4 py-10 text-center text-[12px] text-black/45 dark:text-white/40">
+                    The container is not running — deploy the application to open a shell.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {section === "networking" && application && (
+            <NetworkingCard app={application} applicationId={applicationId} />
+          )}
+
+          {section === "runtime" && application && (
+            <RuntimeCard app={application} applicationId={applicationId} />
+          )}
+
+          {section === "danger" && application && (
+            <DangerCard app={application} applicationId={applicationId} />
+          )}
 
           {section === "domains" && (
             <DomainsCard applicationId={applicationId} domains={domains.data ?? []} />
@@ -285,10 +332,6 @@ export function ApplicationDetailPage() {
           )}
         </div>
       </div>
-
-      {terminalOpen && (
-        <TerminalModal applicationId={applicationId} onClose={() => setTerminalOpen(false)} />
-      )}
     </>
   );
 }
@@ -306,23 +349,15 @@ function ApplicationDetailsCard({ app, applicationId }: { app: Application; appl
 
   const save = useMutation({
     mutationFn: () =>
-      api.put<Application>(`/applications/${applicationId}`, {
-        name: name.trim(),
-        description,
-        gitRepository: app.gitRepository,
-        gitBranch: app.gitBranch,
-        buildPack: app.buildPack,
-        dockerfile: app.dockerfile,
-        baseDirectory: app.baseDirectory,
-        port: app.port,
-        healthCheck: app.healthCheck,
-        nodeId: app.nodeId,
-        autoDeploy: app.autoDeploy,
-      }),
+      api.put<Application>(
+        `/applications/${applicationId}`,
+        applicationPayload(app, { name: name.trim(), description }),
+      ),
     onSuccess: async () => {
       toast.success("Application updated");
       await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
     },
+    onError: (error) => toast.error(errorText(error)),
   });
 
   const dirty = name.trim() !== app.name || description !== app.description;
@@ -468,10 +503,12 @@ function AccessCard({
   app,
   domains,
   onManageDomains,
+  onEditNetworking,
 }: {
   app: Application;
   domains: Domain[];
   onManageDomains: () => void;
+  onEditNetworking: () => void;
 }) {
   const primary = domains[0];
   const publicHost = primary?.host ?? app.fqdn;
@@ -524,13 +561,19 @@ function AccessCard({
         </div>
 
         <div>
-          <div className="text-[11px] tracking-wider text-black/40 uppercase dark:text-white/35">
-            Internal access
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] tracking-wider text-black/40 uppercase dark:text-white/35">
+              Internal access
+            </div>
+            <Button variant="neutral" size="sm" onClick={onEditNetworking}>
+              Edit networking
+            </Button>
           </div>
           <div className="mt-1.5 space-y-1.5">
             <Row label="Container name" value={`meghify-${sanitizeName(app.name)}`} />
             <Row label="Docker network" value={`meghify-${sanitizeName(app.name)}`} />
             <Row label="Exposed port" value={String(app.port)} />
+            <Row label="Port mappings" value={app.portMappings || "none"} />
           </div>
           <p className="mt-2 text-[10.5px] text-black/35 dark:text-white/30">
             Reachable from other containers on the same network as{" "}
@@ -1328,31 +1371,310 @@ function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar
 }
 
 /**
- * An interactive container shell over a WebSocket, opened as a modal from the
- * application header.
+ * The full update payload for an application. PUT replaces every field, so the
+ * stored record supplies the defaults and the card supplies its overrides.
  */
-function TerminalModal({
-  applicationId,
-  onClose,
-}: {
-  applicationId: string;
-  onClose: () => void;
-}) {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const url = `${protocol}://${window.location.host}/api/applications/${applicationId}/terminal`;
+function applicationPayload(app: Application, overrides: Record<string, unknown>) {
+  return {
+    name: app.name,
+    description: app.description,
+    gitRepository: app.gitRepository,
+    gitBranch: app.gitBranch,
+    buildPack: app.buildPack,
+    dockerfile: app.dockerfile,
+    baseDirectory: app.baseDirectory,
+    port: app.port,
+    healthCheck: app.healthCheck,
+    nodeId: app.nodeId,
+    autoDeploy: app.autoDeploy,
+    portMappings: app.portMappings,
+    cpuLimit: app.cpuLimit,
+    memoryLimit: app.memoryLimit,
+    preDeployCommand: app.preDeployCommand,
+    postDeployCommand: app.postDeployCommand,
+    ...overrides,
+  };
+}
+
+/** "512m" / "2g" / plain bytes → bytes; junk means "leave the engine default". */
+function parseMemoryLimit(value: string): number {
+  const raw = value.trim().toLowerCase();
+  if (raw === "") return 0;
+  let multiplier = 1;
+  let number = raw;
+  const suffix = raw.slice(-1);
+  if (suffix === "k") {
+    multiplier = 1024;
+    number = raw.slice(0, -1);
+  } else if (suffix === "m") {
+    multiplier = 1024 * 1024;
+    number = raw.slice(0, -1);
+  } else if (suffix === "g") {
+    multiplier = 1024 * 1024 * 1024;
+    number = raw.slice(0, -1);
+  }
+  const parsed = Number(number.trim());
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * multiplier);
+}
+
+/** Coolify-style Networking card: the port the app listens on and what is published. */
+function NetworkingCard({ app, applicationId }: { app: Application; applicationId: string }) {
+  const queryClient = useQueryClient();
+  const [port, setPort] = useState(String(app.port));
+  const [mappings, setMappings] = useState(app.portMappings);
+
+  useEffect(() => {
+    setPort(String(app.port));
+    setMappings(app.portMappings);
+  }, [app.id, app.port, app.portMappings]);
+
+  const labels = useQuery({
+    queryKey: ["application-labels", applicationId],
+    queryFn: () => api.get<string[]>(`/applications/${applicationId}/labels`),
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Application>(
+        `/applications/${applicationId}`,
+        applicationPayload(app, { port: Number(port) || 0, portMappings: mappings.trim() }),
+      ),
+    onSuccess: async () => {
+      toast.success("Networking saved — redeploy to apply");
+      await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
+      await queryClient.invalidateQueries({ queryKey: ["application-labels", applicationId] });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-4xl overflow-hidden rounded-[8px] border border-line/70 bg-[#0a0a0a]">
-        <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-          <span className="text-[12px] text-white/60">Container terminal</span>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
+    <div className="space-y-3">
+      <Card>
+        <CardHeader>
+          <CardTitle>Networking</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="net-port">Container port</Label>
+              <Input
+                id="net-port"
+                type="number"
+                value={port}
+                onChange={(event) => setPort(event.target.value)}
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                The port the application listens on inside the container; the proxy routes to it.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="net-mappings">Port mappings</Label>
+              <Input
+                id="net-mappings"
+                value={mappings}
+                onChange={(event) => setMappings(event.target.value)}
+                placeholder="8085:3000"
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Publish container ports on the host: hostPort:containerPort, comma separated.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Row label="Container name" value={`meghify-${sanitizeName(app.name)}`} />
+            <Row label="Docker network" value={`meghify-${sanitizeName(app.name)}`} />
+            <Row label="Network alias" value={sanitizeName(app.name)} />
+          </div>
+          <div className="flex justify-end border-t border-line/40 pt-3">
+            <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+              Save changes
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Container labels</CardTitle>
+          <span className="text-[11px] text-black/40 dark:text-white/35">
+            attached on the next deploy
+          </span>
+        </CardHeader>
+        <CardContent>
+          {labels.isLoading ? (
+            <p className="text-[12px] text-black/45 dark:text-white/40">Loading labels…</p>
+          ) : (
+            <pre className="max-h-72 overflow-auto rounded-md bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-white/75">
+              {(labels.data ?? []).join("\n") || "no labels"}
+            </pre>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** Coolify-style Runtime card: container limits and deployment lifecycle hooks. */
+function RuntimeCard({ app, applicationId }: { app: Application; applicationId: string }) {
+  const queryClient = useQueryClient();
+  const [cpu, setCpu] = useState(app.cpuLimit ? String(app.cpuLimit) : "");
+  const [memory, setMemory] = useState(app.memoryLimit ? String(app.memoryLimit) : "");
+  const [pre, setPre] = useState(app.preDeployCommand);
+  const [post, setPost] = useState(app.postDeployCommand);
+
+  useEffect(() => {
+    setCpu(app.cpuLimit ? String(app.cpuLimit) : "");
+    setMemory(app.memoryLimit ? String(app.memoryLimit) : "");
+    setPre(app.preDeployCommand);
+    setPost(app.postDeployCommand);
+  }, [app.id, app.cpuLimit, app.memoryLimit, app.preDeployCommand, app.postDeployCommand]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Application>(
+        `/applications/${applicationId}`,
+        applicationPayload(app, {
+          cpuLimit: Number(cpu) || 0,
+          memoryLimit: parseMemoryLimit(memory),
+          preDeployCommand: pre.trim(),
+          postDeployCommand: post.trim(),
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success("Runtime saved — applied on the next deploy");
+      await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardHeader>
+          <CardTitle>Runtime</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="rt-cpu">CPU limit</Label>
+              <Input
+                id="rt-cpu"
+                value={cpu}
+                onChange={(event) => setCpu(event.target.value)}
+                placeholder="unlimited"
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Fraction of one core, e.g. 1.5. Empty keeps the engine default.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="rt-memory">Memory limit</Label>
+              <Input
+                id="rt-memory"
+                value={memory}
+                onChange={(event) => setMemory(event.target.value)}
+                placeholder="512m · 2g · bytes"
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Accepts 512m, 2g or a plain byte count. Empty keeps the engine default.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="rt-pre">Pre-deployment command</Label>
+              <Textarea
+                id="rt-pre"
+                rows={2}
+                value={pre}
+                onChange={(event) => setPre(event.target.value)}
+                placeholder="php artisan down"
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Runs in the previous container before the swap; a failure aborts the deployment.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="rt-post">Post-deployment command</Label>
+              <Textarea
+                id="rt-post"
+                rows={2}
+                value={post}
+                onChange={(event) => setPost(event.target.value)}
+                placeholder="php artisan migrate --force"
+              />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Runs in the new container once it is live; a failure marks the deployment failed.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end border-t border-line/40 pt-3">
+            <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+              Save changes
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** Coolify-style Danger zone: delete the application and stop its container. */
+function DangerCard({ app, applicationId }: { app: Application; applicationId: string }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const remove = useMutation({
+    mutationFn: () => api.delete(`/applications/${applicationId}`),
+    onSuccess: async () => {
+      toast.success(`${app.name} deleted`);
+      await queryClient.invalidateQueries({ queryKey: ["applications"] });
+      navigate({ to: "/projects" });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  return (
+    <Card className="border-danger/25">
+      <CardHeader>
+        <CardTitle>Danger zone</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/25 bg-danger/5 p-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[12.5px] font-medium">
+              Delete application
+              <span className="rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger">
+                Permanent
+              </span>
+            </div>
+            <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+              Stops and removes the container, then deletes {app.name} with its configuration,
+              domains, variables and deployment history. Volumes and stored data stay on disk.
+            </p>
+          </div>
+          <Button
+            variant="danger"
+            disabled={remove.isPending}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete "${app.name}"? Its container is stopped and removed, and the application cannot be restored. Volumes stay on disk.`,
+                )
+              ) {
+                remove.mutate();
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete application
           </Button>
         </div>
-        <XTerminal url={url} banner="\r\nConnected to container.\r\n" />
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 

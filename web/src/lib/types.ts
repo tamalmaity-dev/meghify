@@ -74,6 +74,14 @@ export interface Application {
   status: string;
   fqdn: string;
   imageTag: string;
+  /** "hostPort:containerPort" pairs, comma separated. */
+  portMappings: string;
+  /** Fraction of one core; zero keeps the engine default. */
+  cpuLimit: number;
+  /** Bytes; zero keeps the engine default. */
+  memoryLimit: number;
+  preDeployCommand: string;
+  postDeployCommand: string;
   /** Set when the repository is deployed through a GitHub App installation. */
   githubAppId?: string;
   githubInstallationId?: number;

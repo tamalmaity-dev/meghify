@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -343,21 +344,57 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		return fmt.Errorf("ensure network: %w", err)
 	}
 
+	// Find the live container once; the replacement is created under a
+	// temporary name, so this lookup only ever sees the previous one.
+	previous, err := p.client.ContainerByName(ctx, app.Name)
+	if err != nil {
+		sink.Write([]byte("[!] could not inspect previous container: " + err.Error() + "\n"))
+		previous = nil
+	}
+	if app.PreDeployCommand != "" && previous != nil {
+		sink.Write([]byte("[*] pre-deployment: " + app.PreDeployCommand + "\n"))
+		if err := p.runContainerCommand(ctx, sink, previous.ID, app.PreDeployCommand); err != nil {
+			return fmt.Errorf("pre-deployment command failed: %w", err)
+		}
+	}
+
 	sink.Write([]byte("[4/4] creating container\n"))
+	ports := map[int]int{app.Port: 0}
+	publishedPorts := false
+	if mappings, err := parseMappings(app.PortMappings); err != nil {
+		sink.Write([]byte("[!] ignoring port mappings: " + err.Error() + "\n"))
+	} else {
+		for containerPort, hostPort := range mappings {
+			ports[containerPort] = hostPort
+			publishedPorts = true
+		}
+	}
 	containerID, err := p.client.CreateContainer(ctx, &docker.ContainerSpec{
 		Name:          fmt.Sprintf("%s-%d", app.Name, time.Now().Unix()),
 		Image:         imageRef,
 		Env:           runtimeEnv,
-		Labels:        proxyLabels(app, domains),
-		Ports:         map[int]int{app.Port: 0},
+		Labels:        ProxyLabels(app, domains),
+		Ports:         ports,
 		Exposed:       []int{app.Port},
 		Volumes:       toMounts(volumes),
 		Networks:      []string{networkName(app)},
 		RestartPolicy: "unless-stopped",
 		HealthCheck:   healthCheckFor(app),
+		MemoryLimit:   app.MemoryLimit,
+		CPULimit:      app.CPULimit,
 	})
 	if err != nil {
 		return err
+	}
+
+	// Host ports cannot be bound twice, so an application that publishes one
+	// must retire the old container before the replacement starts. Everything
+	// else swaps without downtime: start and health-check first, retire after.
+	if publishedPorts && previous != nil {
+		sink.Write([]byte("[ok] releasing published ports from the previous container\n"))
+		p.client.StopContainer(ctx, previous.ID, 20*time.Second)
+		p.client.RemoveContainer(ctx, previous.ID)
+		previous = nil
 	}
 
 	sink.Write([]byte("[4/4] starting container " + shortID(containerID) + "\n"))
@@ -376,10 +413,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		sink.Write([]byte("[ok] container is healthy\n"))
 	}
 
-	previous, err := p.client.ContainerByName(ctx, app.Name)
-	if err != nil {
-		sink.Write([]byte("[!] could not inspect previous container: " + err.Error() + "\n"))
-	} else if previous != nil && previous.ID != containerID {
+	if previous != nil && previous.ID != containerID {
 		sink.Write([]byte("[ok] retiring previous container\n"))
 		p.client.StopContainer(ctx, previous.ID, 20*time.Second)
 		p.client.RemoveContainer(ctx, previous.ID)
@@ -391,8 +425,65 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		sink.Write([]byte("[!] could not rename container: " + err.Error() + "\n"))
 	}
 
+	if app.PostDeployCommand != "" {
+		sink.Write([]byte("[*] post-deployment: " + app.PostDeployCommand + "\n"))
+		if err := p.runContainerCommand(ctx, sink, containerID, app.PostDeployCommand); err != nil {
+			return fmt.Errorf("post-deployment command failed: %w", err)
+		}
+	}
+
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusRunning)
 	return nil
+}
+
+// runContainerCommand executes a shell command inside a container and streams
+// its output to the deployment log.
+func (p *Pipeline) runContainerCommand(ctx context.Context, sink io.Writer, containerID, command string) error {
+	result, err := p.client.RunExec(ctx, containerID, []string{"sh", "-c", command}, nil)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(sink, result.Output)
+	result.Output.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	code, err := result.Wait(ctx)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("command exited with code %d", code)
+	}
+	return nil
+}
+
+// parseMappings splits the stored "host:container" list into the container →
+// host map the container spec expects. Entries are validated on write; a
+// malformed leftover is skipped with a warning in the deployment log.
+func parseMappings(raw string) (map[int]int, error) {
+	mappings := map[int]int{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return mappings, nil
+	}
+	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' }) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		hostRaw, containerRaw, found := strings.Cut(entry, ":")
+		if !found {
+			return nil, fmt.Errorf("port mapping %q is not hostPort:containerPort", entry)
+		}
+		host, hostErr := strconv.Atoi(strings.TrimSpace(hostRaw))
+		container, containerErr := strconv.Atoi(strings.TrimSpace(containerRaw))
+		if hostErr != nil || containerErr != nil || host < 1 || host > 65535 || container < 1 || container > 65535 {
+			return nil, fmt.Errorf("port mapping %q has ports outside 1-65535", entry)
+		}
+		mappings[container] = host
+	}
+	return mappings, nil
 }
 
 // waitHealthy polls a container until its healthcheck reports healthy.
@@ -654,7 +745,10 @@ func toMounts(volumes []*db.Volume) []docker.Mount {
 	return out
 }
 
-func proxyLabels(app *db.Application, domains []*db.Domain) map[string]string {
+// ProxyLabels builds the container labels the proxy (and the panel itself)
+// reads: the traefik router wiring for every attached domain, plus the
+// meghify bookkeeping labels. Exported so the API can show them read-only.
+func ProxyLabels(app *db.Application, domains []*db.Domain) map[string]string {
 	labels := map[string]string{
 		"meghify.application": app.ID,
 		"meghify.port":        fmt.Sprint(app.Port),

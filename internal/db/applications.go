@@ -17,13 +17,15 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 	q := `INSERT INTO applications (id, environment_id, node_id, name, description, git_repository, git_branch,
 	                                 build_pack, dockerfile, base_directory, port, health_check, status, fqdn,
 	                                 image_tag, github_app_id, github_installation_id, repository_full_name,
-	                                 auto_deploy, created_at, updated_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	                                 auto_deploy, port_mappings, cpu_limit, memory_limit, pre_deploy_command,
+	                                 post_deploy_command, created_at, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
 		a.ID, a.EnvironmentID, NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck, a.Status, a.FQDN,
 		a.ImageTag, NullString(a.GitHubAppID), a.GitHubInstallationID, a.RepositoryFullName,
-		a.AutoDeploy, now, now); err != nil {
+		a.AutoDeploy, a.PortMappings, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
+		a.PostDeployCommand, now, now); err != nil {
 		return fmt.Errorf("insert application: %w", err)
 	}
 	a.CreatedAt, a.UpdatedAt = Parse(now), Parse(now)
@@ -33,6 +35,7 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 const appColumns = `id, environment_id, node_id, name, description, git_repository, git_branch,
                     build_pack, dockerfile, base_directory, port, health_check, status, fqdn, image_tag,
                     github_app_id, github_installation_id, repository_full_name, auto_deploy,
+                    port_mappings, cpu_limit, memory_limit, pre_deploy_command, post_deploy_command,
                     created_at, updated_at`
 
 func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
@@ -41,7 +44,8 @@ func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
 	err := scanner.Scan(&a.ID, &a.EnvironmentID, &nodeID, &a.Name, &a.Description, &a.GitRepository,
 		&a.GitBranch, &a.BuildPack, &a.Dockerfile, &a.BaseDirectory, &a.Port, &a.HealthCheck,
 		&a.Status, &a.FQDN, &a.ImageTag, &githubAppID, &a.GitHubInstallationID, &a.RepositoryFullName,
-		&a.AutoDeploy, &createdAt, &updatedAt)
+		&a.AutoDeploy, &a.PortMappings, &a.CPULimit, &a.MemoryLimit, &a.PreDeployCommand,
+		&a.PostDeployCommand, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, ErrNotFound
@@ -112,12 +116,15 @@ func (r *AppRepo) UpdateApplication(ctx context.Context, a *Application) error {
 		                        build_pack = ?, dockerfile = ?, base_directory = ?, port = ?, health_check = ?,
 		                        status = ?, fqdn = ?, image_tag = ?, github_app_id = ?,
 		                        github_installation_id = ?, repository_full_name = ?, auto_deploy = ?,
-		                        updated_at = ?
+		                        port_mappings = ?, cpu_limit = ?, memory_limit = ?, pre_deploy_command = ?,
+		                        post_deploy_command = ?, updated_at = ?
 		  WHERE id = ?`,
 		NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck,
 		a.Status, a.FQDN, a.ImageTag, NullString(a.GitHubAppID),
-		a.GitHubInstallationID, a.RepositoryFullName, a.AutoDeploy, Text(time.Now().UTC()), a.ID)
+		a.GitHubInstallationID, a.RepositoryFullName, a.AutoDeploy,
+		a.PortMappings, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
+		a.PostDeployCommand, Text(time.Now().UTC()), a.ID)
 	if err != nil {
 		return err
 	}

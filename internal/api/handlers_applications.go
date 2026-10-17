@@ -6,11 +6,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/deploy"
 	"github.com/tamalmaity-dev/meghify/internal/github"
 )
 
@@ -26,6 +29,12 @@ type applicationRequest struct {
 	HealthCheck   string `json:"healthCheck"`
 	NodeID        string `json:"nodeId"`
 	FQDN          string `json:"fqdn"`
+	// Runtime settings from the Networking and Runtime cards.
+	PortMappings      string  `json:"portMappings"`
+	CPULimit          float64 `json:"cpuLimit"`
+	MemoryLimit       int64   `json:"memoryLimit"`
+	PreDeployCommand  string  `json:"preDeployCommand"`
+	PostDeployCommand string  `json:"postDeployCommand"`
 	// GitHub linkage, set when the application is created from the GitHub App
 	// repository picker. AutoDeploy defaults to true for those applications.
 	GitHubInstallationID int64  `json:"githubInstallationId"`
@@ -50,7 +59,47 @@ func (req applicationRequest) validate() error {
 	if req.Port < 0 || req.Port > 65535 {
 		return errValidation("port must be between 0 and 65535")
 	}
+	if req.CPULimit < 0 {
+		return errValidation("cpu limit cannot be negative")
+	}
+	if req.MemoryLimit < 0 {
+		return errValidation("memory limit cannot be negative")
+	}
+	if _, err := parsePortMappings(req.PortMappings); err != nil {
+		return err
+	}
 	return nil
+}
+
+// parsePortMappings accepts "8080:3000" or a comma/space separated list of
+// host:container pairs. It returns container → host, the shape the container
+// spec expects.
+func parsePortMappings(raw string) (map[int]int, error) {
+	mappings := map[int]int{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return mappings, nil
+	}
+	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' }) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		hostRaw, containerRaw, found := strings.Cut(entry, ":")
+		if !found {
+			return nil, errValidation("port mappings look like hostPort:containerPort, got " + entry)
+		}
+		host, err := strconv.Atoi(strings.TrimSpace(hostRaw))
+		if err != nil || host < 1 || host > 65535 {
+			return nil, errValidation("invalid host port in mapping " + entry)
+		}
+		container, err := strconv.Atoi(strings.TrimSpace(containerRaw))
+		if err != nil || container < 1 || container > 65535 {
+			return nil, errValidation("invalid container port in mapping " + entry)
+		}
+		mappings[container] = host
+	}
+	return mappings, nil
 }
 
 func errValidation(message string) error { return &validationError{message} }
@@ -94,20 +143,25 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app := &db.Application{
-		ID:            db.NewID(),
-		EnvironmentID: envID,
-		Name:          strings.TrimSpace(req.Name),
-		Description:   req.Description,
-		GitRepository: req.GitRepository,
-		GitBranch:     valueOr(req.GitBranch, "main"),
-		BuildPack:     valueOr(req.BuildPack, db.BuildDockerfile),
-		Dockerfile:    valueOr(req.Dockerfile, "Dockerfile"),
-		BaseDirectory: valueOr(req.BaseDirectory, "/"),
-		Port:          valueOr(req.Port, 3000),
-		HealthCheck:   req.HealthCheck,
-		NodeID:        req.NodeID,
-		FQDN:          strings.ToLower(strings.TrimSpace(req.FQDN)),
-		Status:        db.StatusIdle,
+		ID:                db.NewID(),
+		EnvironmentID:     envID,
+		Name:              strings.TrimSpace(req.Name),
+		Description:       req.Description,
+		GitRepository:     req.GitRepository,
+		GitBranch:         valueOr(req.GitBranch, "main"),
+		BuildPack:         valueOr(req.BuildPack, db.BuildDockerfile),
+		Dockerfile:        valueOr(req.Dockerfile, "Dockerfile"),
+		BaseDirectory:     valueOr(req.BaseDirectory, "/"),
+		Port:              valueOr(req.Port, 3000),
+		HealthCheck:       req.HealthCheck,
+		NodeID:            req.NodeID,
+		FQDN:              strings.ToLower(strings.TrimSpace(req.FQDN)),
+		Status:            db.StatusIdle,
+		PortMappings:      strings.TrimSpace(req.PortMappings),
+		CPULimit:          req.CPULimit,
+		MemoryLimit:       req.MemoryLimit,
+		PreDeployCommand:  strings.TrimSpace(req.PreDeployCommand),
+		PostDeployCommand: strings.TrimSpace(req.PostDeployCommand),
 	}
 	if req.GitHubInstallationID > 0 {
 		if err := s.linkGitHubRepository(r, app, req); err != nil {
@@ -208,6 +262,11 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	existing.Port = valueOr(req.Port, existing.Port)
 	existing.HealthCheck = req.HealthCheck
 	existing.NodeID = req.NodeID
+	existing.PortMappings = strings.TrimSpace(req.PortMappings)
+	existing.CPULimit = req.CPULimit
+	existing.MemoryLimit = req.MemoryLimit
+	existing.PreDeployCommand = strings.TrimSpace(req.PreDeployCommand)
+	existing.PostDeployCommand = strings.TrimSpace(req.PostDeployCommand)
 	// Auto-deploy is toggled from the application page; the GitHub linkage
 	// itself is fixed when the application is created.
 	if req.AutoDeploy != nil && existing.GitHubAppID != "" {
@@ -242,6 +301,34 @@ func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- domains ---
+
+// applicationLabels renders the container labels the next deployment attaches,
+// so the UI can show the proxy wiring the way Coolify's label viewer does.
+func (s *Server) applicationLabels(w http.ResponseWriter, r *http.Request) {
+	app, err := s.store.Applications.ApplicationByID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	domains, err := s.store.Applications.DomainsByApplication(r.Context(), app.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	labels := deploy.ProxyLabels(app, domains)
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, key+"="+labels[key])
+	}
+	writeJSON(w, http.StatusOK, lines)
+}
 
 func (s *Server) listDomains(w http.ResponseWriter, r *http.Request) {
 	domains, err := s.store.Applications.DomainsByApplication(r.Context(), chi.URLParam(r, "id"))

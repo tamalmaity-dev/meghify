@@ -210,6 +210,18 @@ type Application struct {
 	Status        string `json:"status"`
 	FQDN          string `json:"fqdn"`
 	ImageTag      string `json:"imageTag"`
+	// PortMappings publishes container ports on the host, e.g. "8080:3000".
+	// A single mapping or a comma-separated list.
+	PortMappings string `json:"portMappings"`
+	// CPULimit (fraction of one core) and MemoryLimit (bytes) cap the running
+	// container. Zero keeps the engine default.
+	CPULimit    float64 `json:"cpuLimit"`
+	MemoryLimit int64   `json:"memoryLimit"`
+	// PreDeployCommand runs inside the previous container before the new one
+	// replaces it; PostDeployCommand runs inside the new container after it is
+	// live. Empty disables each hook.
+	PreDeployCommand  string `json:"preDeployCommand"`
+	PostDeployCommand string `json:"postDeployCommand"`
 	// GitHub linkage. GitHubAppID is empty for repositories cloned over plain
 	// HTTPS; when it is set the repository can be private and pushes trigger
 	// automatic deployments.

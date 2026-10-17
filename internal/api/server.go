@@ -181,6 +181,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/{id}/terminal", s.terminalSession)
 			r.Get("/{id}/deployments", s.listDeployments)
 			r.Delete("/{id}/deployments", s.clearDeployments)
+			r.Get("/{id}/labels", s.applicationLabels)
 
 			r.Get("/{id}/domains", s.listDomains)
 			r.Post("/{id}/domains", s.createDomain)
