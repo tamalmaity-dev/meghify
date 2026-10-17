@@ -276,6 +276,9 @@ func shortID(id string) string {
 	return id
 }
 
+// NetworkName is the private network an application's container joins.
+func NetworkName(app *db.Application) string { return networkName(app) }
+
 func networkName(app *db.Application) string {
 	return "meghify-" + sanitizeName(app.Name)
 }

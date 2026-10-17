@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronDown, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Square, Terminal, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -1901,20 +1901,9 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
   );
 }
 
-/** Coolify-style Danger zone: delete the application and stop its container. */
+/** Coolify-style Danger zone: a two-step delete with cleanup options. */
 function DangerCard({ app, applicationId }: { app: Application; applicationId: string }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const remove = useMutation({
-    mutationFn: () => api.delete(`/applications/${applicationId}`),
-    onSuccess: async () => {
-      toast.success(`${app.name} deleted`);
-      await queryClient.invalidateQueries({ queryKey: ["applications"] });
-      navigate({ to: "/projects" });
-    },
-    onError: (error) => toast.error(errorText(error)),
-  });
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <Card className="border-danger/25">
@@ -1931,29 +1920,185 @@ function DangerCard({ app, applicationId }: { app: Application; applicationId: s
               </span>
             </div>
             <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-black/50 dark:text-white/45">
-              Stops and removes the container, then deletes {app.name} with its configuration,
-              domains, variables and deployment history. Volumes and stored data stay on disk.
+              Permanently delete {app.name}, stop its containers, and remove the selected Docker
+              resources and configuration. Active deployments stop, and the application cannot be
+              restored.
             </p>
           </div>
-          <Button
-            variant="danger"
-            disabled={remove.isPending}
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete "${app.name}"? Its container is stopped and removed, and the application cannot be restored. Volumes stay on disk.`,
-                )
-              ) {
-                remove.mutate();
-              }
-            }}
-          >
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-4 w-4" />
             Delete application
           </Button>
         </div>
       </CardContent>
+
+      <DeleteApplicationDialog
+        app={app}
+        applicationId={applicationId}
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+      />
     </Card>
+  );
+}
+
+/**
+ * The two-step delete: pick the cleanup options first, then type the resource
+ * name to confirm — the same guard rails Coolify uses.
+ */
+function DeleteApplicationDialog({
+  app,
+  applicationId,
+  open,
+  onClose,
+}: {
+  app: Application;
+  applicationId: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [step, setStep] = useState<1 | 2>(1);
+  const [options, setOptions] = useState({ volumes: true, networks: true, config: true, cleanup: true });
+  const [confirmName, setConfirmName] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setStep(1);
+    setConfirmName("");
+    setOptions({ volumes: true, networks: true, config: true, cleanup: true });
+  }, [open]);
+
+  const remove = useMutation({
+    mutationFn: () =>
+      api.delete<{
+        volumesRemoved: number;
+        networkRemoved: boolean;
+        configRemoved: boolean;
+        spaceReclaimed: number;
+      }>(
+        `/applications/${applicationId}?volumes=${options.volumes ? 1 : 0}&networks=${
+          options.networks ? 1 : 0
+        }&config=${options.config ? 1 : 0}&cleanup=${options.cleanup ? 1 : 0}`,
+      ),
+    onSuccess: async () => {
+      toast.success(`${app.name} deleted`);
+      await queryClient.invalidateQueries({ queryKey: ["applications"] });
+      navigate({ to: "/projects" });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const toggle = (key: keyof typeof options, label: string) => (
+    <label className="flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2 text-[12px]">
+      {label}
+      <input
+        type="checkbox"
+        checked={options[key]}
+        onChange={(event) => setOptions({ ...options, [key]: event.target.checked })}
+      />
+    </label>
+  );
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Delete application?"
+      footer={
+        step === 1 ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={() => setStep(2)}>
+              Continue
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="neutral" onClick={() => setStep(1)}>
+              Back
+            </Button>
+            <Button
+              variant="danger"
+              disabled={confirmName !== app.name || remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              Continue
+            </Button>
+          </>
+        )
+      }
+    >
+      {step === 1 ? (
+        <div className="space-y-2">
+          {toggle("volumes", "Permanently delete all volumes associated with this resource.")}
+          {toggle("networks", "Permanently delete all non-predefined networks associated with this resource.")}
+          {toggle("config", "Permanently delete all configuration files from the server.")}
+          {toggle("cleanup", "Run Docker Cleanup (remove unused images and builder cache).")}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-danger">
+              <TriangleAlert className="h-3.5 w-3.5" />
+              Warning
+            </div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-danger/90">
+              This operation is permanent and cannot be undone. Please think again before
+              proceeding!
+            </p>
+          </div>
+
+          <div>
+            <div className="text-[12px] font-semibold">The following actions will be performed:</div>
+            <ul className="mt-1.5 space-y-1 text-[11.5px] text-danger/90">
+              <li>- Permanently delete this resource and its selected Docker resources.</li>
+              {options.volumes && (
+                <li>- Permanently delete all volumes associated with this resource.</li>
+              )}
+              {options.networks && (
+                <li>- Permanently delete all non-predefined networks associated with this resource.</li>
+              )}
+              {options.config && <li>- Permanently delete all configuration files from the server.</li>}
+              {options.cleanup && (
+                <li>- Run Docker Cleanup (remove unused images and builder cache).</li>
+              )}
+            </ul>
+          </div>
+
+          <div>
+            <div className="text-[12px] font-semibold">Confirm actions</div>
+            <p className="mt-0.5 text-[11px] text-black/50 dark:text-white/45">
+              Enter the resource name to confirm permanent deletion
+            </p>
+            <div className="mt-1.5 flex items-center justify-between gap-3 rounded-md border border-line/60 bg-recessed px-3 py-2 font-mono text-[12px]">
+              <span className="truncate">{app.name}</span>
+              <button
+                type="button"
+                title="Copy the name"
+                className="shrink-0 text-black/45 transition-colors hover:text-current dark:text-white/40"
+                onClick={() => navigator.clipboard?.writeText(app.name)}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="confirm-delete-name">Resource name</Label>
+            <Input
+              id="confirm-delete-name"
+              value={confirmName}
+              onChange={(event) => setConfirmName(event.target.value)}
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

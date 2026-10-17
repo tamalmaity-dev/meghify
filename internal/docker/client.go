@@ -650,6 +650,17 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, internal bool) 
 	return resp.ID, nil
 }
 
+// RemoveNetwork deletes a network by name; a missing network is not an error.
+func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
+	if err := c.cli.NetworkRemove(ctx, name); err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("remove network: %w", err)
+	}
+	return nil
+}
+
 // DiskUsage reports total bytes used by images, containers and volumes.
 func (c *Client) DiskUsage(ctx context.Context) (int64, error) {
 	usage, err := c.cli.DiskUsage(ctx, types.DiskUsageOptions{})

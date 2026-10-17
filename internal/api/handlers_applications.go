@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -296,23 +298,111 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, existing)
 }
 
+// deleteApplication removes an application, and — when the Coolify-style
+// cleanup options are ticked — the resources it leaves behind: volume
+// directories, its private network, its deploy workspace and image/build
+// caches.
 func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-
 	app, err := s.store.Applications.ApplicationByID(r.Context(), id)
-	if err == nil && s.docker != nil {
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+
+	cleanVolumes := r.URL.Query().Get("volumes") == "1"
+	cleanNetworks := r.URL.Query().Get("networks") == "1"
+	cleanConfig := r.URL.Query().Get("config") == "1"
+	runDockerCleanup := r.URL.Query().Get("cleanup") == "1"
+
+	result := map[string]any{
+		"volumesRemoved": 0,
+		"networkRemoved": false,
+		"configRemoved":  false,
+		"spaceReclaimed": int64(0),
+	}
+
+	// The container goes first so its network and images can be removed.
+	if s.docker != nil {
 		if container, cerr := s.docker.ContainerByName(r.Context(), app.Name); cerr == nil && container != nil {
 			s.docker.StopContainer(r.Context(), container.ID, 20)
 			s.docker.RemoveContainer(r.Context(), container.ID)
 		}
 	}
 
+	// Volume records are meaningless once the application is gone; the ticked
+	// option controls the stored data behind them.
+	removed := 0
+	if volumes, err := s.store.Applications.VolumesByTarget(r.Context(), db.TargetApplication, id); err == nil {
+		for _, volume := range volumes {
+			if cleanVolumes && removablePath(volume.HostPath) {
+				if err := os.RemoveAll(volume.HostPath); err == nil {
+					removed++
+				} else {
+					s.logger.Warn("could not remove volume path", "path", volume.HostPath, "error", err)
+				}
+			}
+			s.store.Applications.DeleteVolume(r.Context(), volume.ID)
+		}
+	}
+	result["volumesRemoved"] = removed
+
+	if cleanNetworks && s.docker != nil {
+		if err := s.docker.RemoveNetwork(r.Context(), deploy.NetworkName(app)); err == nil {
+			result["networkRemoved"] = true
+		}
+	}
+
+	if cleanConfig {
+		workspace := filepath.Join(s.cfg.DataDir, "workspaces", app.ID)
+		if err := os.RemoveAll(workspace); err == nil {
+			result["configRemoved"] = true
+		}
+	}
+
+	if runDockerCleanup && s.docker != nil {
+		var reclaimed int64
+		if bytes, err := s.docker.PruneImages(r.Context()); err == nil {
+			reclaimed += bytes
+		}
+		if bytes, err := s.docker.BuildCachePrune(r.Context()); err == nil {
+			reclaimed += bytes
+		}
+		// The application's own built images also qualify.
+		slug := "/" + strings.ToLower(strings.TrimSpace(app.Name)) + ":"
+		if images, err := s.docker.ListImages(r.Context()); err == nil {
+			for _, summary := range images {
+				for _, tag := range summary.RepoTags {
+					if strings.Contains(tag, slug) {
+						_ = s.docker.RemoveImage(r.Context(), tag)
+					}
+				}
+			}
+		}
+		result["spaceReclaimed"] = reclaimed
+	}
+
 	if err := s.store.Applications.DeleteApplication(r.Context(), id); err != nil {
 		mapError(w, err)
 		return
 	}
-	s.audit(r.Context(), r, "application.delete", "application", id, nil)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	s.audit(r.Context(), r, "application.delete", "application", id, result)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// removablePath reports whether a volume path is safe to delete: something
+// specific, never a system directory.
+func removablePath(path string) bool {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || path == "." || path == string(filepath.Separator) {
+		return false
+	}
+	protected := map[string]bool{
+		"/": true, "/bin": true, "/boot": true, "/dev": true, "/etc": true, "/home": true,
+		"/lib": true, "/opt": true, "/proc": true, "/root": true, "/run": true, "/sbin": true,
+		"/srv": true, "/sys": true, "/tmp": true, "/usr": true, "/var": true,
+	}
+	return !protected[path]
 }
 
 // --- domains ---
