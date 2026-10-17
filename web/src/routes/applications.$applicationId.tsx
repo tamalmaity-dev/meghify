@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Play, RotateCcw, Square, Terminal } from "lucide-react";
+import { Github, Play, RotateCcw, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -164,6 +164,9 @@ export function ApplicationDetailPage() {
             (application ? (
               <div className="space-y-3">
                 <ApplicationDetailsCard app={application} applicationId={applicationId} />
+                {application.repositoryFullName && (
+                  <GitHubCard app={application} applicationId={applicationId} />
+                )}
                 <AccessCard
                   app={application}
                   domains={domains.data ?? []}
@@ -307,6 +310,7 @@ function ApplicationDetailsCard({ app, applicationId }: { app: Application; appl
         port: app.port,
         healthCheck: app.healthCheck,
         nodeId: app.nodeId,
+        autoDeploy: app.autoDeploy,
       }),
     onSuccess: async () => {
       toast.success("Application updated");
@@ -348,6 +352,102 @@ function ApplicationDetailsCard({ app, applicationId }: { app: Application; appl
             Save
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * The GitHub App link: which repository this application deploys from and
+ * whether a push to the tracked branch redeploys it automatically.
+ */
+function GitHubCard({ app, applicationId }: { app: Application; applicationId: string }) {
+  const queryClient = useQueryClient();
+  const [autoDeploy, setAutoDeploy] = useState(app.autoDeploy);
+
+  useEffect(() => {
+    setAutoDeploy(app.autoDeploy);
+  }, [app.id, app.autoDeploy]);
+
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api.put<Application>(`/applications/${applicationId}`, {
+        name: app.name,
+        description: app.description,
+        gitRepository: app.gitRepository,
+        gitBranch: app.gitBranch,
+        buildPack: app.buildPack,
+        dockerfile: app.dockerfile,
+        baseDirectory: app.baseDirectory,
+        port: app.port,
+        healthCheck: app.healthCheck,
+        nodeId: app.nodeId,
+        autoDeploy: enabled,
+      }),
+    onSuccess: async (_updated, enabled) => {
+      toast.success(
+        enabled ? "Automatic deploys enabled for this branch" : "Automatic deploys disabled",
+      );
+      await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
+    },
+    onError: () => setAutoDeploy(app.autoDeploy),
+  });
+
+  const webUrl = app.gitRepository.replace(/\.git$/, "");
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Source</CardTitle>
+        <span className="flex items-center gap-1.5 text-[11px] text-black/40 dark:text-white/35">
+          <Github className="h-3.5 w-3.5" />
+          GitHub App
+        </span>
+      </CardHeader>
+      <CardContent className="space-y-3 text-[12px]">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-black/50 dark:text-white/45">Repository</span>
+            {webUrl ? (
+              <a
+                href={webUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="truncate font-mono text-[11.5px] text-brand hover:underline"
+              >
+                {app.repositoryFullName || webUrl}
+              </a>
+            ) : (
+              <span className="truncate font-mono text-[11.5px]">
+                {app.repositoryFullName || "-"}
+              </span>
+            )}
+          </div>
+          <Row label="Branch" value={app.gitBranch || "main"} />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2">
+          <div className="min-w-0">
+            <div className="text-[12px] font-medium">Deploy on every push</div>
+            <div className="text-[10.5px] text-black/40 dark:text-white/30">
+              {autoDeploy
+                ? `Pushes to ${app.gitBranch || "main"} redeploy this application through the GitHub webhook.`
+                : "Pushes are ignored; deploys only run when you press Deploy."}
+            </div>
+          </div>
+          <Button
+            variant={autoDeploy ? "neutral" : "primary"}
+            size="sm"
+            disabled={toggle.isPending}
+            onClick={() => {
+              setAutoDeploy(!autoDeploy);
+              toggle.mutate(!autoDeploy);
+            }}
+          >
+            {autoDeploy ? "Disable" : "Enable"}
+          </Button>
+        </div>
+        {toggle.isError && <p className="text-[11px] text-danger">{errorText(toggle.error)}</p>}
       </CardContent>
     </Card>
   );

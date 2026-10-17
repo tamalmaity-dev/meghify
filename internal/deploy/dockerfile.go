@@ -17,8 +17,13 @@ import (
 	"github.com/tamalmaity-dev/meghify/internal/docker"
 )
 
-// GitCredentialResolver returns a credential for a repository URL, if configured.
-type GitCredentialResolver func(repository string) (username, token string, ok bool)
+// GitCredentialResolver mints a short-lived credential for an application that
+// clones a private repository (for example through a GitHub App installation).
+//
+// A nil error with an empty token means "clone anonymously". An error aborts
+// the build: retrying a private clone without credentials would only produce a
+// confusing authentication failure.
+type GitCredentialResolver func(app *db.Application) (username, token string, err error)
 
 // runDockerfile builds from an explicit Dockerfile and swaps the container.
 func (p *Pipeline) runDockerfile(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
@@ -280,14 +285,35 @@ func (p *Pipeline) gitClone(ctx context.Context, sink io.Writer, app *db.Applica
 	if err := os.MkdirAll(filepath.Dir(workdir), 0o755); err != nil {
 		return err
 	}
+	clone, err := p.cloneURL(app)
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1",
-		"--branch", valueOrDefault(app.GitBranch, "main"), p.cloneURL(app), workdir)
+		"--branch", valueOrDefault(app.GitBranch, "main"), clone, workdir)
 	cmd.Stdout, cmd.Stderr = sink, sink
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	// The credential was minted for this clone and expires within the hour.
+	// Keep it out of .git/config so a later fetch cannot pick up a stale token.
+	if clone != app.GitRepository {
+		scrub := exec.CommandContext(ctx, "git", "remote", "set-url", "origin", app.GitRepository)
+		scrub.Dir = workdir
+		scrub.Stdout, scrub.Stderr = sink, sink
+		if err := scrub.Run(); err != nil {
+			sink.Write([]byte("[!] could not strip credentials from origin\n"))
+		}
+	}
+	return nil
 }
 
 func (p *Pipeline) gitFetch(ctx context.Context, sink io.Writer, app *db.Application, workdir string) error {
-	fetch := exec.CommandContext(ctx, "git", "fetch", "origin", valueOrDefault(app.GitBranch, "main"))
+	remote, err := p.cloneURL(app)
+	if err != nil {
+		return err
+	}
+	fetch := exec.CommandContext(ctx, "git", "fetch", "--depth", "1", remote, valueOrDefault(app.GitBranch, "main"))
 	fetch.Dir = workdir
 	fetch.Stdout, fetch.Stderr = sink, sink
 	if err := fetch.Run(); err != nil {
@@ -300,19 +326,25 @@ func (p *Pipeline) gitFetch(ctx context.Context, sink io.Writer, app *db.Applica
 	return reset.Run()
 }
 
-// cloneURL injects credentials for private repositories.
-func (p *Pipeline) cloneURL(app *db.Application) string {
+// cloneURL injects credentials for private repositories. The credential is
+// minted fresh for every git operation: GitHub App installation tokens live for
+// one hour, so a token embedded at clone time would be expired by the next
+// deployment.
+func (p *Pipeline) cloneURL(app *db.Application) (string, error) {
 	if p.git == nil {
-		return app.GitRepository
+		return app.GitRepository, nil
 	}
-	user, token, ok := p.git(app.GitRepository)
-	if !ok || token == "" {
-		return app.GitRepository
+	user, token, err := p.git(app)
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return app.GitRepository, nil
 	}
 	if !strings.Contains(app.GitRepository, "://") {
-		return fmt.Sprintf("https://%s:%s@%s", user, token, app.GitRepository)
+		return fmt.Sprintf("https://%s:%s@%s", user, token, app.GitRepository), nil
 	}
-	return strings.Replace(app.GitRepository, "://", "://"+user+":"+token+"@", 1)
+	return strings.Replace(app.GitRepository, "://", "://"+user+":"+token+"@", 1), nil
 }
 
 // imageReference computes the tag used for a build.

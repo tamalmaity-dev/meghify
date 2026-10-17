@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/github"
 )
 
 type applicationRequest struct {
@@ -20,6 +21,11 @@ type applicationRequest struct {
 	HealthCheck   string `json:"healthCheck"`
 	NodeID        string `json:"nodeId"`
 	FQDN          string `json:"fqdn"`
+	// GitHub linkage, set when the application is created from the GitHub App
+	// repository picker. AutoDeploy defaults to true for those applications.
+	GitHubInstallationID int64  `json:"githubInstallationId"`
+	RepositoryFullName   string `json:"repositoryFullName"`
+	AutoDeploy           *bool  `json:"autoDeploy"`
 }
 
 func (req applicationRequest) validate() error {
@@ -98,6 +104,12 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		FQDN:          strings.ToLower(strings.TrimSpace(req.FQDN)),
 		Status:        db.StatusIdle,
 	}
+	if req.GitHubInstallationID > 0 {
+		if err := s.linkGitHubRepository(r, app, req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if err := s.store.Applications.CreateApplication(r.Context(), app); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -107,6 +119,34 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r.Context(), r, "application.create", "application", app.ID, nil)
 	writeJSON(w, http.StatusCreated, app)
+}
+
+// linkGitHubRepository attaches a repository picked from a GitHub App
+// installation, which enables private clones and webhook auto-deploy.
+func (s *Server) linkGitHubRepository(r *http.Request, app *db.Application, req applicationRequest) error {
+	installation, err := s.store.GitHub.GitHubInstallationByInstallationID(r.Context(), req.GitHubInstallationID)
+	if err != nil {
+		return errValidation("the selected GitHub installation is unknown — refresh the source list")
+	}
+	fullName := strings.TrimSpace(req.RepositoryFullName)
+	if fullName == "" {
+		return errValidation("repositoryFullName is required with a GitHub installation")
+	}
+	app.GitHubAppID = installation.GitHubAppID
+	app.GitHubInstallationID = installation.InstallationID
+	app.RepositoryFullName = fullName
+	app.AutoDeploy = req.AutoDeploy == nil || *req.AutoDeploy
+
+	if strings.TrimSpace(app.GitRepository) == "" {
+		// The picker normally sends the canonical clone URL; fall back to the
+		// source's host so a bare full name still clones.
+		base := github.DefaultBaseURL
+		if source, err := s.store.GitHub.GitHubAppByID(r.Context(), installation.GitHubAppID); err == nil && source.BaseURL != "" {
+			base = source.BaseURL
+		}
+		app.GitRepository = base + "/" + fullName + ".git"
+	}
+	return nil
 }
 
 func (s *Server) getApplication(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +186,11 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	existing.Port = valueOr(req.Port, existing.Port)
 	existing.HealthCheck = req.HealthCheck
 	existing.NodeID = req.NodeID
+	// Auto-deploy is toggled from the application page; the GitHub linkage
+	// itself is fixed when the application is created.
+	if req.AutoDeploy != nil && existing.GitHubAppID != "" {
+		existing.AutoDeploy = *req.AutoDeploy
+	}
 
 	if err := s.store.Applications.UpdateApplication(r.Context(), existing); err != nil {
 		mapError(w, err)

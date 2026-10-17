@@ -89,6 +89,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/version", s.versionInfo)
 	s.hub.Mount(r)
 
+	// GitHub delivers app webhooks straight to the panel. Those requests are
+	// authenticated by the app's webhook signature, not a session cookie, so
+	// the endpoint must sit outside the authenticated API group.
+	r.Post("/api/webhooks/github", s.gitHubWebhook)
+
 	r.Route("/api/auth", func(r chi.Router) {
 		// Resolve the caller when a session cookie is present so /session can
 		// report who is signed in and /logout can revoke the right session.
@@ -213,6 +218,27 @@ func (s *Server) Router() http.Handler {
 		r.Route("/jobs", func(r chi.Router) {
 			r.Get("/", s.listJobs)
 			r.Delete("/{id}", s.retryJob)
+		})
+
+		// GitHub App sources: registration (manifest flow), installations and
+		// the repository lists the deployment picker reads.
+		r.Route("/github", func(r chi.Router) {
+			r.Get("/apps", s.listGitHubApps)
+			r.Post("/apps", s.createGitHubApp)
+			r.Get("/apps/{id}", s.getGitHubApp)
+			r.Get("/apps/{id}/manifest", s.gitHubAppManifest)
+			r.Post("/apps/{id}/credentials", s.setGitHubAppCredentials)
+			r.Post("/apps/{id}/sync", s.syncGitHubAppInstallations)
+			r.Delete("/apps/{id}", s.deleteGitHubApp)
+
+			r.Get("/installations", s.listGitHubInstallations)
+			r.Post("/installations/sync", s.syncGitHubInstallations)
+			r.Get("/installations/{installationId}/repositories", s.listGitHubRepositories)
+
+			// GitHub redirects the user's browser to these during the manifest
+			// and installation flows; the session cookie authorizes them.
+			r.Get("/callback", s.gitHubCallback)
+			r.Get("/setup", s.gitHubSetup)
 		})
 	})
 

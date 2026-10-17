@@ -16,12 +16,14 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 	now := Text(time.Now().UTC())
 	q := `INSERT INTO applications (id, environment_id, node_id, name, description, git_repository, git_branch,
 	                                 build_pack, dockerfile, base_directory, port, health_check, status, fqdn,
-	                                 image_tag, created_at, updated_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	                                 image_tag, github_app_id, github_installation_id, repository_full_name,
+	                                 auto_deploy, created_at, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
 		a.ID, a.EnvironmentID, NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck, a.Status, a.FQDN,
-		a.ImageTag, now, now); err != nil {
+		a.ImageTag, NullString(a.GitHubAppID), a.GitHubInstallationID, a.RepositoryFullName,
+		a.AutoDeploy, now, now); err != nil {
 		return fmt.Errorf("insert application: %w", err)
 	}
 	a.CreatedAt, a.UpdatedAt = Parse(now), Parse(now)
@@ -30,14 +32,16 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 
 const appColumns = `id, environment_id, node_id, name, description, git_repository, git_branch,
                     build_pack, dockerfile, base_directory, port, health_check, status, fqdn, image_tag,
+                    github_app_id, github_installation_id, repository_full_name, auto_deploy,
                     created_at, updated_at`
 
 func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
 	var a Application
-	var nodeID, createdAt, updatedAt sql.NullString
+	var nodeID, githubAppID, createdAt, updatedAt sql.NullString
 	err := scanner.Scan(&a.ID, &a.EnvironmentID, &nodeID, &a.Name, &a.Description, &a.GitRepository,
 		&a.GitBranch, &a.BuildPack, &a.Dockerfile, &a.BaseDirectory, &a.Port, &a.HealthCheck,
-		&a.Status, &a.FQDN, &a.ImageTag, &createdAt, &updatedAt)
+		&a.Status, &a.FQDN, &a.ImageTag, &githubAppID, &a.GitHubInstallationID, &a.RepositoryFullName,
+		&a.AutoDeploy, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, ErrNotFound
@@ -46,6 +50,7 @@ func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
 	}
 	// node_id is nullable because a resource can be unpinned from any server.
 	a.NodeID = nullString(nodeID)
+	a.GitHubAppID = nullString(githubAppID)
 	a.CreatedAt, a.UpdatedAt = Parse(nullString(createdAt)), Parse(nullString(updatedAt))
 	return &a, nil
 }
@@ -105,15 +110,41 @@ func (r *AppRepo) UpdateApplication(ctx context.Context, a *Application) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE applications SET node_id = ?, name = ?, description = ?, git_repository = ?, git_branch = ?,
 		                        build_pack = ?, dockerfile = ?, base_directory = ?, port = ?, health_check = ?,
-		                        status = ?, fqdn = ?, image_tag = ?, updated_at = ?
+		                        status = ?, fqdn = ?, image_tag = ?, github_app_id = ?,
+		                        github_installation_id = ?, repository_full_name = ?, auto_deploy = ?,
+		                        updated_at = ?
 		  WHERE id = ?`,
 		NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck,
-		a.Status, a.FQDN, a.ImageTag, Text(time.Now().UTC()), a.ID)
+		a.Status, a.FQDN, a.ImageTag, NullString(a.GitHubAppID),
+		a.GitHubInstallationID, a.RepositoryFullName, a.AutoDeploy, Text(time.Now().UTC()), a.ID)
 	if err != nil {
 		return err
 	}
 	return rowsAffected(res)
+}
+
+// AutoDeployApplications lists the applications wired to a repository that
+// should redeploy when a push lands on the given branch.
+func (r *AppRepo) AutoDeployApplications(ctx context.Context, githubAppID, fullName, branch string) ([]*Application, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+appColumns+` FROM applications
+		  WHERE auto_deploy AND github_app_id = ? AND repository_full_name = ? AND git_branch = ?
+		  ORDER BY created_at DESC`, githubAppID, fullName, branch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*Application
+	for rows.Next() {
+		a, err := scanApp(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // PatchApplicationStatus updates only the lifecycle state.

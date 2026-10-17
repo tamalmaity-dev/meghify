@@ -31,3 +31,6 @@
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local Linux test builds
+meghify-linux-test

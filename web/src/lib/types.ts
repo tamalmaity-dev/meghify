@@ -71,8 +71,62 @@ export interface Application {
   status: string;
   fqdn: string;
   imageTag: string;
+  /** Set when the repository is deployed through a GitHub App installation. */
+  githubAppId?: string;
+  githubInstallationId?: number;
+  repositoryFullName?: string;
+  autoDeploy: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GitHubApp {
+  id: string;
+  name: string;
+  slug: string;
+  appId: number;
+  clientId: string;
+  htmlUrl: string;
+  baseUrl: string;
+  organization: string;
+  configured: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubInstallation {
+  id: string;
+  githubAppId: string;
+  appName: string;
+  installationId: number;
+  accountLogin: string;
+  accountType: string;
+  repositorySelection: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubRepository {
+  id: number;
+  fullName: string;
+  private: boolean;
+  archived: boolean;
+  defaultBranch: string;
+  cloneUrl: string;
+  htmlUrl: string;
+  updatedAt: string;
+}
+
+export interface GitHubRepositoryList {
+  totalCount: number;
+  repositories: GitHubRepository[];
+}
+
+export interface GitHubManifest {
+  postUrl: string;
+  manifest: Record<string, unknown>;
+  webhookUrl: string;
+  panelUrl: string;
 }
 
 export interface Deployment {

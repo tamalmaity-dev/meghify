@@ -184,6 +184,107 @@ func TestJobListHidesTelemetryAndPruneTargetsOneKind(t *testing.T) {
 	}
 }
 
+func TestGitHubSourceLinkDrivesAutoDeploy(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	project := &db.Project{ID: db.NewID(), Name: "proj"}
+	if err := store.Projects.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	env := &db.Environment{ID: db.NewID(), ProjectID: project.ID, Name: "production"}
+	if err := store.Projects.CreateEnvironment(ctx, env); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	source := &db.GitHubApp{ID: db.NewID(), Name: "meghify-test", AppID: 7, PrivateKeyEnc: "sealed"}
+	if err := store.GitHub.CreateGitHubApp(ctx, source); err != nil {
+		t.Fatalf("create github app: %v", err)
+	}
+	if !source.Configured() {
+		// A sealed key alone configures the app; the numeric id confirms it.
+		t.Fatal("app with an id and key should count as configured")
+	}
+
+	installation := &db.GitHubInstallation{
+		ID: db.NewID(), GitHubAppID: source.ID, InstallationID: 42,
+		AccountLogin: "acme", AccountType: "Organization", RepositorySelection: "all",
+	}
+	if err := store.GitHub.UpsertGitHubInstallation(ctx, installation); err != nil {
+		t.Fatalf("upsert installation: %v", err)
+	}
+	// A second sync for the same installation must refresh, not duplicate.
+	installation.AccountLogin = "acme-renamed"
+	if err := store.GitHub.UpsertGitHubInstallation(ctx, installation); err != nil {
+		t.Fatalf("upsert installation again: %v", err)
+	}
+	stored, err := store.GitHub.ListGitHubInstallations(ctx)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(stored) != 1 || stored[0].AccountLogin != "acme-renamed" || stored[0].AppName != "meghify-test" {
+		t.Fatalf("unexpected installations: %+v", stored)
+	}
+
+	app := &db.Application{
+		ID: db.NewID(), EnvironmentID: env.ID, Name: "web",
+		GitRepository: "https://github.com/acme/web.git", GitBranch: "main",
+		BuildPack: db.BuildNixpacks, Status: db.StatusIdle,
+		GitHubAppID: source.ID, GitHubInstallationID: 42,
+		RepositoryFullName: "acme/web", AutoDeploy: true,
+	}
+	if err := store.Applications.CreateApplication(ctx, app); err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+
+	// The webhook path: a push to the tracked branch matches, anything else not.
+	matches, err := store.Applications.AutoDeployApplications(ctx, source.ID, "acme/web", "main")
+	if err != nil {
+		t.Fatalf("match: %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != app.ID {
+		t.Fatalf("expected one match, got %d", len(matches))
+	}
+	if other, err := store.Applications.AutoDeployApplications(ctx, source.ID, "acme/web", "dev"); err != nil || len(other) != 0 {
+		t.Fatalf("branch mismatch should not match: %v %d", err, len(other))
+	}
+	if other, err := store.Applications.AutoDeployApplications(ctx, source.ID, "acme/api", "main"); err != nil || len(other) != 0 {
+		t.Fatalf("repository mismatch should not match: %v %d", err, len(other))
+	}
+
+	// Turning auto-deploy off takes the application out of the webhook path.
+	app.AutoDeploy = false
+	if err := store.Applications.UpdateApplication(ctx, app); err != nil {
+		t.Fatalf("update application: %v", err)
+	}
+	if other, err := store.Applications.AutoDeployApplications(ctx, source.ID, "acme/web", "main"); err != nil || len(other) != 0 {
+		t.Fatalf("disabled auto-deploy should not match: %v %d", err, len(other))
+	}
+
+	// Deleting the source keeps the application and its repository URL, but
+	// severs the link (and drops the installation with it).
+	if err := store.GitHub.DeleteGitHubApp(ctx, source.ID); err != nil {
+		t.Fatalf("delete github app: %v", err)
+	}
+	reloaded, err := store.Applications.ApplicationByID(ctx, app.ID)
+	if err != nil {
+		t.Fatalf("reload application: %v", err)
+	}
+	if reloaded.GitHubAppID != "" || reloaded.GitHubInstallationID != 0 || reloaded.AutoDeploy {
+		t.Fatalf("link not severed: %+v", reloaded)
+	}
+	if reloaded.GitRepository != app.GitRepository {
+		t.Fatalf("repository url changed: %q", reloaded.GitRepository)
+	}
+	remaining, err := store.GitHub.ListGitHubInstallations(ctx)
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("installations should cascade, got %d", len(remaining))
+	}
+}
+
 func TestTimestampsRoundTrip(t *testing.T) {
 	store := openStore(t)
 	_ = store

@@ -191,23 +191,30 @@ type Environment struct {
 
 // Application is a deployable unit built from a Git repository.
 type Application struct {
-	ID            string    `json:"id"`
-	EnvironmentID string    `json:"environmentId"`
-	NodeID        string    `json:"nodeId,omitempty"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	GitRepository string    `json:"gitRepository"`
-	GitBranch     string    `json:"gitBranch"`
-	BuildPack     string    `json:"buildPack"`
-	Dockerfile    string    `json:"dockerfile"`
-	BaseDirectory string    `json:"baseDirectory"`
-	Port          int       `json:"port"`
-	HealthCheck   string    `json:"healthCheck"`
-	Status        string    `json:"status"`
-	FQDN          string    `json:"fqdn"`
-	ImageTag      string    `json:"imageTag"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            string `json:"id"`
+	EnvironmentID string `json:"environmentId"`
+	NodeID        string `json:"nodeId,omitempty"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	GitRepository string `json:"gitRepository"`
+	GitBranch     string `json:"gitBranch"`
+	BuildPack     string `json:"buildPack"`
+	Dockerfile    string `json:"dockerfile"`
+	BaseDirectory string `json:"baseDirectory"`
+	Port          int    `json:"port"`
+	HealthCheck   string `json:"healthCheck"`
+	Status        string `json:"status"`
+	FQDN          string `json:"fqdn"`
+	ImageTag      string `json:"imageTag"`
+	// GitHub linkage. GitHubAppID is empty for repositories cloned over plain
+	// HTTPS; when it is set the repository can be private and pushes trigger
+	// automatic deployments.
+	GitHubAppID          string    `json:"githubAppId,omitempty"`
+	GitHubInstallationID int64     `json:"githubInstallationId,omitempty"`
+	RepositoryFullName   string    `json:"repositoryFullName,omitempty"`
+	AutoDeploy           bool      `json:"autoDeploy"`
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
 // Service is a Docker Compose stack managed by the panel.
@@ -343,4 +350,43 @@ type Webhook struct {
 	Provider      string    `json:"provider"`
 	Secret        string    `json:"-"`
 	CreatedAt     time.Time `json:"createdAt"`
+}
+
+// GitHubApp is a GitHub App registration owned by the panel. It is created
+// through GitHub's manifest flow: the row is written first (so the redirect can
+// find it again) and filled with credentials when GitHub hands them back.
+type GitHubApp struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Slug             string    `json:"slug"`
+	AppID            int64     `json:"appId"`
+	ClientID         string    `json:"clientId"`
+	ClientSecretEnc  string    `json:"-"`
+	PrivateKeyEnc    string    `json:"-"`
+	WebhookSecretEnc string    `json:"-"`
+	HTMLURL          string    `json:"htmlUrl"`
+	BaseURL          string    `json:"baseUrl"`
+	Organization     string    `json:"organization"`
+	State            string    `json:"-"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+// Configured reports whether GitHub has issued the app its credentials. An app
+// is briefly unconfigured between "Register With GitHub" and the callback that
+// exchanges the manifest code.
+func (a *GitHubApp) Configured() bool { return a.AppID > 0 && a.PrivateKeyEnc != "" }
+
+// GitHubInstallation is one account (a user or an organization) that installed
+// a GitHub App. AppName is joined in for list responses.
+type GitHubInstallation struct {
+	ID                  string    `json:"id"`
+	GitHubAppID         string    `json:"githubAppId"`
+	AppName             string    `json:"appName"`
+	InstallationID      int64     `json:"installationId"`
+	AccountLogin        string    `json:"accountLogin"`
+	AccountType         string    `json:"accountType"`
+	RepositorySelection string    `json:"repositorySelection"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }

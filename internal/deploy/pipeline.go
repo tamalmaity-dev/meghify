@@ -46,7 +46,8 @@ type Options struct {
 	DataDir  string
 	Registry RegistryConfig
 	Emitter  Emitter
-	// GitToken resolves a stored credential for a private repository. Optional.
+	// GitToken mints a credential for an application that clones private
+	// repositories. Optional: public repositories clone anonymously.
 	GitToken GitCredentialResolver
 }
 

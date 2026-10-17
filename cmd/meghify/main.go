@@ -23,6 +23,7 @@ import (
 	"github.com/tamalmaity-dev/meghify/internal/db"
 	"github.com/tamalmaity-dev/meghify/internal/deploy"
 	"github.com/tamalmaity-dev/meghify/internal/docker"
+	"github.com/tamalmaity-dev/meghify/internal/github"
 	"github.com/tamalmaity-dev/meghify/internal/jobs"
 	"github.com/tamalmaity-dev/meghify/internal/node"
 	"github.com/tamalmaity-dev/meghify/internal/realtime"
@@ -114,7 +115,8 @@ func run() error {
 			User: cfg.RegistryUser,
 			Pass: cfg.RegistryPass,
 		},
-		Emitter: hub,
+		Emitter:  hub,
+		GitToken: gitHubCredential(store, authService, logger),
 	})
 
 	runner := jobs.NewRunner(jobs.Options{
@@ -272,6 +274,39 @@ func registerJobs(
 			logger.Warn("startup cleanup failed", "error", err)
 		}
 	})
+}
+
+// gitHubCredential mints installation tokens for applications linked to a
+// GitHub App. The token authenticates the clone; it lives for one hour, so one
+// is minted per git operation rather than stored on disk.
+func gitHubCredential(store *db.Store, authService *auth.Service, logger *slog.Logger) deploy.GitCredentialResolver {
+	return func(app *db.Application) (string, string, error) {
+		if app.GitHubAppID == "" || app.GitHubInstallationID == 0 {
+			return "", "", nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		source, err := store.GitHub.GitHubAppByID(ctx, app.GitHubAppID)
+		if err != nil {
+			return "", "", fmt.Errorf("load github source: %w", err)
+		}
+		key, err := authService.Open(source.PrivateKeyEnc)
+		if err != nil {
+			return "", "", fmt.Errorf("open github private key: %w", err)
+		}
+		jwt, err := github.SignAppJWT(source.AppID, key, time.Now())
+		if err != nil {
+			return "", "", err
+		}
+		token, err := github.NewClient(source.BaseURL).InstallationToken(ctx, jwt, app.GitHubInstallationID)
+		if err != nil {
+			logger.Warn("github installation token failed", "application", app.Name, "error", err)
+			return "", "", fmt.Errorf("could not authenticate to GitHub for %s: %w", app.RepositoryFullName, err)
+		}
+		return "x-access-token", token, nil
+	}
 }
 
 func newLogger(cfg *config.Config) *slog.Logger {

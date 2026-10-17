@@ -16,10 +16,13 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as ApplicationsApplicationIdRouteImport } from './routes/applications.$applicationId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
+import { Route as SourcesIndexRouteImport } from './routes/sources.index'
+import { Route as SourcesAppIdRouteImport } from './routes/sources.$appId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -56,6 +59,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SourcesRoute = SourcesRouteImport.update({
+  id: '/sources',
+  path: '/sources',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamRoute = TeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -77,6 +85,16 @@ const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
   path: '/$projectId',
   getParentRoute: () => ProjectsRoute,
 } as any)
+const SourcesIndexRoute = SourcesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SourcesRoute,
+} as any)
+const SourcesAppIdRoute = SourcesAppIdRouteImport.update({
+  id: '/$appId',
+  path: '/$appId',
+  getParentRoute: () => SourcesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -86,10 +104,13 @@ export interface FileRoutesByFullPath {
   '/nodes': typeof NodesRoute
   '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/sources/$appId': typeof SourcesAppIdRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/sources/': typeof SourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -101,7 +122,9 @@ export interface FileRoutesByTo {
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/sources/$appId': typeof SourcesAppIdRoute
   '/projects': typeof ProjectsIndexRoute
+  '/sources': typeof SourcesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -112,10 +135,13 @@ export interface FileRoutesById {
   '/nodes': typeof NodesRoute
   '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/sources/$appId': typeof SourcesAppIdRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/sources/': typeof SourcesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -127,10 +153,13 @@ export interface FileRouteTypes {
     | '/nodes'
     | '/projects'
     | '/settings'
+    | '/sources'
     | '/team'
     | '/applications/$applicationId'
     | '/projects/$projectId'
+    | '/sources/$appId'
     | '/projects/'
+    | '/sources/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -142,7 +171,9 @@ export interface FileRouteTypes {
     | '/team'
     | '/applications/$applicationId'
     | '/projects/$projectId'
+    | '/sources/$appId'
     | '/projects'
+    | '/sources'
   id:
     | '__root__'
     | '/'
@@ -152,10 +183,13 @@ export interface FileRouteTypes {
     | '/nodes'
     | '/projects'
     | '/settings'
+    | '/sources'
     | '/team'
     | '/applications/$applicationId'
     | '/projects/$projectId'
+    | '/sources/$appId'
     | '/projects/'
+    | '/sources/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -166,6 +200,7 @@ export interface RootRouteChildren {
   NodesRoute: typeof NodesRoute
   ProjectsRoute: typeof ProjectsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
+  SourcesRoute: typeof SourcesRouteWithChildren
   TeamRoute: typeof TeamRoute
   ApplicationsApplicationIdRoute: typeof ApplicationsApplicationIdRoute
 }
@@ -221,6 +256,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sources': {
+      id: '/sources'
+      path: '/sources'
+      fullPath: '/sources'
+      preLoaderRoute: typeof SourcesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/team': {
       id: '/team'
       path: '/team'
@@ -249,6 +291,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdRouteImport
       parentRoute: typeof ProjectsRoute
     }
+    '/sources/': {
+      id: '/sources/'
+      path: '/'
+      fullPath: '/sources/'
+      preLoaderRoute: typeof SourcesIndexRouteImport
+      parentRoute: typeof SourcesRoute
+    }
+    '/sources/$appId': {
+      id: '/sources/$appId'
+      path: '/$appId'
+      fullPath: '/sources/$appId'
+      preLoaderRoute: typeof SourcesAppIdRouteImport
+      parentRoute: typeof SourcesRoute
+    }
   }
 }
 
@@ -266,6 +322,19 @@ const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
   ProjectsRouteChildren,
 )
 
+interface SourcesRouteChildren {
+  SourcesAppIdRoute: typeof SourcesAppIdRoute
+  SourcesIndexRoute: typeof SourcesIndexRoute
+}
+
+const SourcesRouteChildren: SourcesRouteChildren = {
+  SourcesAppIdRoute: SourcesAppIdRoute,
+  SourcesIndexRoute: SourcesIndexRoute,
+}
+
+const SourcesRouteWithChildren =
+  SourcesRoute._addFileChildren(SourcesRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DatabasesRoute: DatabasesRoute,
@@ -274,6 +343,7 @@ const rootRouteChildren: RootRouteChildren = {
   NodesRoute: NodesRoute,
   ProjectsRoute: ProjectsRouteWithChildren,
   SettingsRoute: SettingsRoute,
+  SourcesRoute: SourcesRouteWithChildren,
   TeamRoute: TeamRoute,
   ApplicationsApplicationIdRoute: ApplicationsApplicationIdRoute,
 }

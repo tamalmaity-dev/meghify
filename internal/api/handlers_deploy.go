@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -31,37 +33,12 @@ func (s *Server) deployApplication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Never run two builds for the same application concurrently.
-	if running, err := s.store.Deployments.LatestDeployment(r.Context(), appID); err == nil && running != nil {
-		if isInFlight(running.Status) {
-			writeError(w, http.StatusConflict, "a deployment is already running")
-			return
-		}
-	}
-
-	deployment := &db.Deployment{
-		ID:            db.NewID(),
-		ApplicationID: appID,
-		Status:        db.DeployQueued,
-		Trigger:       db.TriggerManual,
-		QueuedAt:      time.Now().UTC(),
-	}
-	if err := s.store.Deployments.CreateDeployment(r.Context(), deployment); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	deployment, err := s.queueDeployment(r.Context(), app, db.TriggerManual, req.NoCache, "", "")
+	switch {
+	case errors.Is(err, errDeploymentRunning):
+		writeError(w, http.StatusConflict, err.Error())
 		return
-	}
-
-	payload, err := json.Marshal(deployPayload{
-		DeploymentID:  deployment.ID,
-		ApplicationID: appID,
-		NoCache:       req.NoCache,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if _, err := s.store.Jobs.Enqueue(r.Context(), db.JobDeploy, string(payload), time.Now(), 1); err != nil {
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -69,6 +46,55 @@ func (s *Server) deployApplication(w http.ResponseWriter, r *http.Request) {
 	s.audit(r.Context(), r, "deployment.create", "deployment", deployment.ID,
 		map[string]any{"application": app.Name})
 	writeJSON(w, http.StatusAccepted, deployment)
+}
+
+// errDeploymentRunning reports a build already in flight for an application.
+// The manual endpoint surfaces it as a 409; webhooks treat it as a no-op.
+var errDeploymentRunning = errors.New("a deployment is already running")
+
+// queueDeployment records a deployment and enqueues the job that runs it. The
+// manual deploy endpoint and GitHub push webhooks share it, so both paths
+// enforce the same "one build at a time" rule.
+func (s *Server) queueDeployment(
+	ctx context.Context,
+	app *db.Application,
+	trigger string,
+	noCache bool,
+	commitSHA, commitMessage string,
+) (*db.Deployment, error) {
+	// Never run two builds for the same application concurrently.
+	if running, err := s.store.Deployments.LatestDeployment(ctx, app.ID); err == nil && running != nil {
+		if isInFlight(running.Status) {
+			return nil, errDeploymentRunning
+		}
+	}
+
+	deployment := &db.Deployment{
+		ID:            db.NewID(),
+		ApplicationID: app.ID,
+		Status:        db.DeployQueued,
+		Trigger:       trigger,
+		CommitSHA:     commitSHA,
+		CommitMessage: commitMessage,
+		QueuedAt:      time.Now().UTC(),
+	}
+	if err := s.store.Deployments.CreateDeployment(ctx, deployment); err != nil {
+		return nil, err
+	}
+
+	payload, err := json.Marshal(deployPayload{
+		DeploymentID:  deployment.ID,
+		ApplicationID: app.ID,
+		NoCache:       noCache,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.store.Jobs.Enqueue(ctx, db.JobDeploy, string(payload), time.Now(), 1); err != nil {
+		return nil, err
+	}
+	return deployment, nil
 }
 
 // deployPayload mirrors deploy.Payload without importing the package here.

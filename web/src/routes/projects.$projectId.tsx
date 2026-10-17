@@ -5,9 +5,11 @@ import {
   Database as DatabaseIcon,
   FileCode2,
   GitBranch,
+  Github,
   Layers,
   Package,
   Plus,
+  RefreshCw,
   Search,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -21,10 +23,17 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import type { Application, Database, Project } from "@/lib/types";
+import type {
+  Application,
+  Database,
+  GitHubInstallation,
+  GitHubRepository,
+  GitHubRepositoryList,
+  Project,
+} from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
-type SourceKind = "git" | "dockerfile" | "compose" | "image";
+type SourceKind = "git" | "github" | "dockerfile" | "compose" | "image";
 type Category = "all" | "applications" | "databases";
 
 interface SourceCard {
@@ -46,9 +55,18 @@ const APP_SOURCES: SourceCard[] = [
     title: "Git Repository",
     tag: "Git source",
     description:
-      "Deploy straight from a public or private repository. Nixpacks or Railpack detect the stack automatically.",
+      "Deploy straight from a public repository over HTTPS. Nixpacks or Railpack detect the stack automatically.",
     icon: <GitBranch className="h-4 w-4" />,
     iconClass: "bg-brand/15 text-brand",
+  },
+  {
+    kind: "github",
+    title: "Git Repository (with GitHub App)",
+    tag: "GitHub source",
+    description:
+      "Deploy public or private GitHub repositories through a GitHub App, with automatic deploys on every push.",
+    icon: <Github className="h-4 w-4" />,
+    iconClass: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
   },
   {
     kind: "dockerfile",
@@ -125,6 +143,7 @@ const DATABASE_CARDS: DatabaseCard[] = [
   },
 ];
 
+// The build packs the deploy pipeline can use to build an application from a repository.
 const PACK_CHOICES = [
   { value: "nixpacks", label: "Nixpacks (auto detect)" },
   { value: "railpack", label: "Railpack (auto detect)" },
@@ -172,6 +191,14 @@ export function ProjectDetailPage() {
   const [dbForm, setDbForm] = useState<{ name: string; kind: string; version: string } | null>(null);
   const [credentials, setCredentials] = useState<{ user: string; password: string; port: number } | null>(null);
 
+  // GitHub App flow: pick an installation, then a repository, and the usual
+  // application form opens prefilled with the repository and its branch.
+  const [githubStep, setGithubStep] = useState<"apps" | "repos" | null>(null);
+  const [githubInstallation, setGithubInstallation] = useState<GitHubInstallation | null>(null);
+  const [githubRepo, setGithubRepo] = useState<GitHubRepository | null>(null);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [autoDeploy, setAutoDeploy] = useState(true);
+
   const project = useQuery({
     queryKey: ["projects", projectId],
     queryFn: () => api.get<Project>(`/projects/${projectId}`),
@@ -188,17 +215,32 @@ export function ProjectDetailPage() {
     queryKey: ["environments", projectId],
     queryFn: () => api.get<{ id: string; name: string }[]>(`/projects/${projectId}/environments`),
   });
+  const githubInstallations = useQuery({
+    queryKey: ["github-installations"],
+    queryFn: () => api.get<GitHubInstallation[]>("/github/installations"),
+    enabled: githubStep !== null,
+  });
+  const githubRepos = useQuery({
+    queryKey: ["github-repos", githubInstallation?.installationId],
+    queryFn: () =>
+      api.get<GitHubRepositoryList>(
+        `/github/installations/${githubInstallation?.installationId}/repositories`,
+      ),
+    enabled: githubStep === "repos" && githubInstallation !== null,
+  });
 
   const environmentId = envId || environments.data?.[0]?.id || "";
   const appList = (apps.data ?? []).filter((app) => app.environmentId === environmentId);
   const dbList = (databases.data ?? []).filter((db) => db.environmentId === environmentId);
 
   const needsDockerfilePath =
-    appSource === "dockerfile" || (appSource === "git" && appForm.buildPack === "dockerfile");
+    appSource === "dockerfile" ||
+    ((appSource === "git" || appSource === "github") && appForm.buildPack === "dockerfile");
   const appValid =
     appSource !== null &&
     appForm.name.trim() !== "" &&
     (appSource === "compose" ? appForm.compose.trim() !== "" : appForm.repository.trim() !== "") &&
+    (appSource !== "github" || (githubInstallation !== null && githubRepo !== null)) &&
     (!needsDockerfilePath || appForm.dockerfilePath.trim() !== "") &&
     environmentId !== "";
 
@@ -216,6 +258,31 @@ export function ProjectDetailPage() {
     setAppSource(kind);
   };
 
+  /** Enter the GitHub App half of the resource chooser. */
+  const beginGitHubFlow = () => {
+    setGithubInstallation(null);
+    setGithubRepo(null);
+    setRepoSearch("");
+    setGithubStep("apps");
+  };
+
+  /** Repository picked: open the application form prefilled with its details. */
+  const selectGitHubRepository = (repo: GitHubRepository) => {
+    setGithubRepo(repo);
+    setAutoDeploy(true);
+    setAppForm({
+      name: repo.fullName.split("/").pop() ?? repo.fullName,
+      repository: repo.cloneUrl,
+      branch: repo.defaultBranch || "main",
+      buildPack: "nixpacks",
+      dockerfilePath: "Dockerfile",
+      compose: "",
+      port: 3000,
+      healthCheck: "/",
+    });
+    setAppSource("github");
+  };
+
   const createApplication = useMutation({
     // The environment rides on the query string: POST /applications?environmentId=…
     mutationFn: (input: { environmentId: string; body: Record<string, unknown> }) =>
@@ -226,9 +293,21 @@ export function ProjectDetailPage() {
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: ["applications"] });
       setAppSource(null);
+      setGithubStep(null);
+      setGithubInstallation(null);
+      setGithubRepo(null);
       setView("resources");
       toast.success(`${created.name} created — open it to deploy`);
     },
+  });
+
+  const syncInstallations = useMutation({
+    mutationFn: () => api.post<GitHubInstallation[]>("/github/installations/sync"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["github-installations"] });
+      toast.success("Installations refreshed from GitHub");
+    },
+    onError: (error) => toast.error(errorText(error)),
   });
 
   const createDatabase = useMutation({
@@ -255,6 +334,19 @@ export function ProjectDetailPage() {
           gitBranch: appForm.branch,
           buildPack: appForm.buildPack,
           dockerfile: appForm.buildPack === "dockerfile" ? appForm.dockerfilePath : "Dockerfile",
+        });
+        break;
+      case "github":
+        // The installation id ties the application to the GitHub App, enabling
+        // private clones and the push webhook that redeploys it.
+        send({
+          gitRepository: appForm.repository.trim(),
+          gitBranch: appForm.branch,
+          buildPack: appForm.buildPack,
+          dockerfile: appForm.buildPack === "dockerfile" ? appForm.dockerfilePath : "Dockerfile",
+          githubInstallationId: githubInstallation?.installationId,
+          repositoryFullName: githubRepo?.fullName ?? "",
+          autoDeploy,
         });
         break;
       case "dockerfile":
@@ -292,6 +384,11 @@ export function ProjectDetailPage() {
     () => DATABASE_CARDS.filter((card) => matches(card.title, card.description)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [query],
+  );
+
+  const repoQuery = repoSearch.trim().toLowerCase();
+  const filteredRepos = (githubRepos.data?.repositories ?? []).filter(
+    (repo) => repoQuery === "" || repo.fullName.toLowerCase().includes(repoQuery),
   );
 
   const sourceMeta = APP_SOURCES.find((source) => source.kind === appSource);
@@ -424,6 +521,194 @@ export function ProjectDetailPage() {
             </CardContent>
           </Card>
         </>
+      ) : githubStep === "apps" ? (
+        <>
+          <button
+            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            onClick={() => setGithubStep(null)}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Add resource
+          </button>
+
+          <PageHeader
+            title="Choose GitHub App"
+            description="Pick the GitHub account Meghify should use to reach your repositories."
+          />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>GitHub App installations</CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => syncInstallations.mutate()}
+                disabled={syncInstallations.isPending}
+                title="Refresh installations from GitHub"
+              >
+                <RefreshCw
+                  className={syncInstallations.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}
+                />
+                Refresh
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {githubInstallations.isLoading ? (
+                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                  Loading installations…
+                </p>
+              ) : (githubInstallations.data ?? []).length === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <p className="text-[12px] text-black/45 dark:text-white/40">
+                    No GitHub App is installed on any account yet.
+                  </p>
+                  <Link
+                    to="/sources"
+                    className="mt-2 inline-block text-[12px] text-brand hover:underline"
+                  >
+                    Add a GitHub App in Sources
+                  </Link>
+                </div>
+              ) : (
+                <div className="divide-y divide-line/40">
+                  {(githubInstallations.data ?? []).map((installation) => (
+                    <button
+                      key={installation.id}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                      onClick={() => {
+                        setGithubInstallation(installation);
+                        setRepoSearch("");
+                        setGithubStep("repos");
+                      }}
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-[11px] font-semibold uppercase dark:bg-white/[0.08]">
+                        {installation.accountLogin.slice(0, 1)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium">
+                          {installation.accountLogin}
+                        </span>
+                        <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
+                          App: {installation.appName} ·{" "}
+                          {installation.repositorySelection === "all"
+                            ? "all repositories"
+                            : "selected repositories"}
+                        </span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="border-t border-line/40 px-4 py-2.5">
+                <Link
+                  to="/sources"
+                  className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add GitHub App
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      ) : githubStep === "repos" ? (
+        <>
+          <button
+            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            onClick={() => setGithubStep("apps")}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            GitHub Apps
+          </button>
+
+          <PageHeader
+            title="Choose a repository"
+            description={`Repositories available to ${githubInstallation?.accountLogin ?? "your GitHub account"}.`}
+          />
+
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-56 flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Input
+                value={repoSearch}
+                onChange={(event) => setRepoSearch(event.target.value)}
+                placeholder="Search repositories"
+                className="pl-8"
+                autoFocus
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => githubRepos.refetch()}
+              disabled={githubRepos.isFetching}
+              title="Reload the repository list from GitHub"
+            >
+              <RefreshCw
+                className={githubRepos.isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}
+              />
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              {githubRepos.isLoading ? (
+                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                  Loading repositories from GitHub…
+                </p>
+              ) : githubRepos.isError ? (
+                <p className="px-4 py-8 text-center text-[12px] text-danger">
+                  {errorText(githubRepos.error)}
+                </p>
+              ) : filteredRepos.length === 0 ? (
+                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                  {repoSearch.trim()
+                    ? "No repository matches that search."
+                    : "This installation cannot see any repositories."}
+                </p>
+              ) : (
+                <div className="divide-y divide-line/40">
+                  {filteredRepos.map((repo) => (
+                    <button
+                      key={repo.id}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                      onClick={() => selectGitHubRepository(repo)}
+                    >
+                      <Github className="h-4 w-4 shrink-0 text-black/35 dark:text-white/30" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-medium">{repo.fullName}</span>
+                          {repo.private && (
+                            <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                              Private
+                            </span>
+                          )}
+                          {repo.archived && (
+                            <span className="rounded-full bg-black/[0.06] px-1.5 py-0.5 text-[10px] text-black/50 dark:bg-white/[0.08] dark:text-white/40">
+                              Archived
+                            </span>
+                          )}
+                        </span>
+                        <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
+                          default branch {repo.defaultBranch || "main"}
+                        </span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {githubRepos.data &&
+                githubRepos.data.totalCount > githubRepos.data.repositories.length && (
+                  <p className="border-t border-line/40 px-4 py-2 text-[10.5px] text-black/40 dark:text-white/35">
+                    Showing the first {githubRepos.data.repositories.length} of{" "}
+                    {githubRepos.data.totalCount} repositories.
+                  </p>
+                )}
+            </CardContent>
+          </Card>
+        </>
       ) : (
         <>
           <button
@@ -495,7 +780,13 @@ export function ProjectDetailPage() {
                         <Button
                           variant="primary"
                           size="sm"
-                          onClick={() => openApplication(source.kind)}
+                          onClick={() => {
+                            if (source.kind === "github") {
+                              beginGitHubFlow();
+                            } else {
+                              openApplication(source.kind);
+                            }
+                          }}
                           title={environmentId === "" ? "No environment available yet" : undefined}
                         >
                           Deploy
