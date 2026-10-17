@@ -262,7 +262,10 @@ func (s *Server) clearDeployments(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	list, err := s.store.Jobs.Jobs(r.Context(), status, 100)
+	// Host-metrics samples are pruned quickly, but hide the kind outright so the
+	// queue page can never be flooded by telemetry again. Every row it shows is
+	// work someone (or a schedule) actually asked for.
+	list, err := s.store.Jobs.JobsExcludingKind(r.Context(), status, db.JobNodeMetrics, 100)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

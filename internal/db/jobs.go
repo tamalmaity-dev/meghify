@@ -209,6 +209,49 @@ func (r *JobRepo) PruneJobs(ctx context.Context, olderThan time.Time) (int64, er
 	return res.RowsAffected()
 }
 
+// PruneJobsByKind deletes finished jobs of one kind older than the cutoff.
+// Routine kinds such as host-metrics sampling are pruned aggressively so the
+// queue stays a record of meaningful work rather than a telemetry log.
+func (r *JobRepo) PruneJobsByKind(ctx context.Context, kind string, olderThan time.Time) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM jobs WHERE kind = ? AND status IN (?, ?) AND created_at < ?`,
+		kind, JobDone, JobFailed, Text(olderThan))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// JobsExcludingKind lists jobs, newest first, skipping one kind. The queue page
+// hides host-metrics rows this way, so telemetry can never bury real work.
+func (r *JobRepo) JobsExcludingKind(ctx context.Context, status, excludeKind string, limit int) ([]*Job, error) {
+	query := `SELECT id, kind, payload, status, attempts, max_attempts, run_at, locked_at, last_error, created_at, started_at, finished_at
+	   FROM jobs WHERE kind != ?`
+	args := []any{excludeKind}
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 func scanJob(scanner interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
 	var runAt, createdAt string

@@ -229,6 +229,9 @@ func registerJobs(
 		})
 	})
 
+	// Kept so telemetry rows queued by releases before v0.1.8 still drain. New
+	// samples run straight from the scheduler (see below) and never enter the
+	// queue, so the Job queue page only ever shows real work.
 	runner.Register(db.JobNodeMetrics, func(ctx context.Context, payload string) error {
 		return collectMetrics(ctx, store)
 	})
@@ -249,10 +252,26 @@ func registerJobs(
 
 	// Periodic maintenance: sample the host every 15s and prune old rows
 	// hourly. The metrics job reads the machine directly, so it runs even when
-	// the Docker engine is unavailable.
+	// the Docker engine is unavailable. Sampling runs directly from the
+	// scheduler: a metric every 15s would otherwise bury deploys and backups in
+	// thousands of queue rows.
 	runner.StartCronScheduler()
-	runner.RegisterCron("@every 15s", db.JobNodeMetrics, "")
+	runner.RegisterCronFunc("@every 15s", func(ctx context.Context) {
+		if err := collectMetrics(ctx, store); err != nil {
+			logger.Warn("metrics collection failed", "error", err)
+		}
+	})
 	runner.RegisterCron("@every 1h", db.JobGC, "")
+
+	// One cleanup pass shortly after boot. Retention windows and the queue prune
+	// otherwise only run on the hourly schedule, so a panel that was offline for
+	// days — or upgraded from a release that queued telemetry — is tidied
+	// immediately instead of an hour later.
+	time.AfterFunc(20*time.Second, func() {
+		if err := collectGarbage(context.Background(), store, client, cfg.MetricsRetentionDays); err != nil {
+			logger.Warn("startup cleanup failed", "error", err)
+		}
+	})
 }
 
 func newLogger(cfg *config.Config) *slog.Logger {

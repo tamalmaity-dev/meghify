@@ -7,9 +7,19 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import type { Job } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
+/** Friendly names for the queue's job kinds. */
+const KIND_LABELS: Record<string, string> = {
+  deploy: "Application deploy",
+  build_image: "Compose stack build",
+  backup: "Database backup",
+  gc: "Cleanup & retention",
+  node_metrics: "Host metrics",
+};
+
 /**
  * The durable queue powers deploys, backups and housekeeping. Surfacing it makes
- * a stuck job obvious instead of leaving it as a mystery outage.
+ * a stuck job obvious instead of leaving it as a mystery outage. Host metrics are
+ * sampled outside the queue, so every row here is real work.
  */
 export function JobsPage() {
   const jobs = useQuery({
@@ -24,7 +34,7 @@ export function JobsPage() {
     <>
       <PageHeader
         title="Job queue"
-        description="Background work runs from a table in the panel's own database. No Redis required."
+        description="Deploys, backups and housekeeping run from a table in the panel's own database — no Redis needed. Host metrics are sampled outside the queue, so every row here is real work."
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -70,7 +80,12 @@ export function JobsPage() {
           >
             {(jobs.data ?? []).map((job) => (
               <Tr key={job.id}>
-                <Td className="font-mono text-[12px]">{job.kind}</Td>
+                <Td>
+                  <div className="text-[12px]">{KIND_LABELS[job.kind] ?? job.kind}</div>
+                  <div className="font-mono text-[10.5px] text-black/40 dark:text-white/30">
+                    {job.kind}
+                  </div>
+                </Td>
                 <Td>
                   <StatusBadge status={job.status} />
                 </Td>

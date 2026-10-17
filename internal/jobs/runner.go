@@ -104,6 +104,23 @@ func (r *Runner) RegisterCron(spec, kind, payload string) {
 	}
 }
 
+// RegisterCronFunc schedules a plain function on the cron sidecar. Use it for
+// frequent, self-contained upkeep such as host metrics sampling: running it
+// straight from the scheduler keeps the jobs table a record of real work
+// (deploys, backups) instead of a telemetry log.
+func (r *Runner) RegisterCronFunc(spec string, fn func(ctx context.Context)) {
+	if r.cron == nil {
+		return
+	}
+	if _, err := r.cron.AddFunc(spec, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		fn(ctx)
+	}); err != nil {
+		r.logger.Error("register cron function failed", "spec", spec, "error", err)
+	}
+}
+
 // StartCronScheduler starts the cron sidecar. Call it once, before Start.
 func (r *Runner) StartCronScheduler() {
 	if r.cron != nil {

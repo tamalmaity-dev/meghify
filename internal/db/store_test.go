@@ -127,6 +127,63 @@ func TestJobDeadLettersAfterMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestJobListHidesTelemetryAndPruneTargetsOneKind(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	// Host-metrics rows used to be queue entries too, one every 15 seconds.
+	for i := 0; i < 5; i++ {
+		if _, err := store.Jobs.Enqueue(ctx, db.JobNodeMetrics, `{}`, time.Now(), 1); err != nil {
+			t.Fatalf("enqueue metrics: %v", err)
+		}
+	}
+	if _, err := store.Jobs.Enqueue(ctx, db.JobDeploy, `{}`, time.Now(), 1); err != nil {
+		t.Fatalf("enqueue deploy: %v", err)
+	}
+
+	// Drain the queue so every row is finished.
+	for {
+		job, err := store.Jobs.Claim(ctx)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if job == nil {
+			break
+		}
+		if err := store.Jobs.Complete(ctx, job.ID); err != nil {
+			t.Fatalf("complete: %v", err)
+		}
+	}
+
+	visible, err := store.Jobs.JobsExcludingKind(ctx, "", db.JobNodeMetrics, 100)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(visible) != 1 || visible[0].Kind != db.JobDeploy {
+		t.Fatalf("expected only the deploy job to be visible, got %d rows", len(visible))
+	}
+
+	// A real job — pending or finished — must survive a metrics prune, even with
+	// a cutoff in the future.
+	if _, err := store.Jobs.Enqueue(ctx, db.JobDeploy, `{}`, time.Now(), 1); err != nil {
+		t.Fatalf("enqueue deploy: %v", err)
+	}
+	pruned, err := store.Jobs.PruneJobsByKind(ctx, db.JobNodeMetrics, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if pruned != 5 {
+		t.Fatalf("pruned = %d, want 5", pruned)
+	}
+	remaining, err := store.Jobs.Jobs(ctx, "", 100)
+	if err != nil {
+		t.Fatalf("list after prune: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("expected both deploy jobs to survive, got %d", len(remaining))
+	}
+}
+
 func TestTimestampsRoundTrip(t *testing.T) {
 	store := openStore(t)
 	_ = store

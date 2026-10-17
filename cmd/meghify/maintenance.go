@@ -61,6 +61,11 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 	if _, err := store.Jobs.PruneJobs(ctx, time.Now().AddDate(0, 0, -7)); err != nil {
 		return err
 	}
+	// Host-metrics sampling no longer enters the queue, but panels upgraded from
+	// older releases still hold thousands of rows: clear them within the hour.
+	if _, err := store.Jobs.PruneJobsByKind(ctx, db.JobNodeMetrics, time.Now().Add(-time.Hour)); err != nil {
+		return err
+	}
 	if _, err := store.Users.DeleteExpiredSessions(ctx); err != nil {
 		return err
 	}
