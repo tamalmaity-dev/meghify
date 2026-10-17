@@ -97,3 +97,93 @@ func TestBuilderContextDir(t *testing.T) {
 		}
 	}
 }
+
+// The dynamic routing file must carry every guarantee the old container
+// labels carried: router pair per domain, path prefix, gzip, robots, the
+// HTTP->HTTPS redirect, the letsencrypt resolver, and a backend addressed by
+// the application container's stable name.
+func TestDynamicConfigYAMLTLS(t *testing.T) {
+	app := &db.Application{ID: "app-1", Name: "roopsa-web", Port: 3000}
+	domains := []*db.Domain{{
+		ID:             "d1",
+		ApplicationID:  app.ID,
+		Host:           "roopsa-web.example.com",
+		TLSEnabled:     true,
+		SearchIndexing: true,
+	}}
+	out := DynamicConfigYAML(app, domains, true)
+
+	for _, want := range []string{
+		"Host(`roopsa-web.example.com`)",
+		"https-roopsa-web-0:",
+		"http-roopsa-web-0:",
+		"certResolver: letsencrypt",
+		"roopsa-web-gzip:",
+		"url: \"http://meghify-roopsa-web:3000\"",
+		"passHostHeader: true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "X-Robots-Tag") {
+		t.Fatalf("search indexing is on, robots middleware must be absent:\n%s", out)
+	}
+}
+
+func TestDynamicConfigYAMLPathAndRobots(t *testing.T) {
+	app := &db.Application{ID: "app-1", Name: "api", Port: 8080}
+	domains := []*db.Domain{{
+		ID:             "d1",
+		ApplicationID:  app.ID,
+		Host:           "panel.example.com",
+		TLSEnabled:     true,
+		Path:           "/api/v3",
+		Port:           9090,
+		RedirectHTTPS:  true,
+		SearchIndexing: false,
+	}}
+	// No ACME account configured: TLS routers exist, but without a resolver.
+	out := DynamicConfigYAML(app, domains, false)
+
+	for _, want := range []string{
+		"Host(`panel.example.com`) && PathPrefix(`/api/v3`)",
+		"api-robots-0:",
+		"X-Robots-Tag: none",
+		"api-redirect-to-https-0:",
+		"scheme: https",
+		"url: \"http://meghify-api:9090\"",
+		"- http",
+		"- https",
+		"tls:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "certResolver") {
+		t.Fatalf("no ACME account, yet a resolver was attached:\n%s", out)
+	}
+	// A plain domain never gets an https router (it would have nothing to
+	// serve) — the redirect option only applies where TLS exists.
+	plain := []*db.Domain{{
+		ID: "d2", ApplicationID: app.ID, Host: "plain.example.com",
+		RedirectHTTPS: true, SearchIndexing: true,
+	}}
+	if out := DynamicConfigYAML(app, plain, true); strings.Contains(out, "- https") {
+		t.Fatalf("plain domain must not get an https router:\n%s", out)
+	}
+}
+
+func TestDynamicConfigYAMLEmpty(t *testing.T) {
+	out := DynamicConfigYAML(&db.Application{ID: "app-1", Name: "x", Port: 80}, nil, true)
+	// Traefik rejects standalone empty sections and one unparseable file
+	// poisons the whole directory, so an app without domains must yield a
+	// comment-only file.
+	if strings.Contains(out, "http:") || strings.Contains(out, "routers") {
+		t.Fatalf("a domainless app must not emit a config skeleton:\n%s", out)
+	}
+	if !strings.Contains(out, "managed by meghify") {
+		t.Fatalf("expected the managed header comment, got:\n%s", out)
+	}
+}

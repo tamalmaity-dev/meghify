@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.6.2](0.6.2.md) | 2026-10-18 | Dokploy-style dynamic file routing (hot domain edits, no-redeploy), builds with a whole 2-core node, 45m default deploy timeout |
 | [0.6.1](0.6.1.md) | 2026-10-18 | Confirmed releases (crash detection with container logs, auto-revert), build-time `--add-host` DNS for sibling services, Coolify-style nixpacks invocation |
 | [0.6.0](0.6.0.md) | 2026-10-18 | Isolated Docker-in-Docker build sandbox with CPU/RAM limits, 30m deploy timeout, Kill build, startup recovery, Node 22 nixpacks default |
 | [0.5.1](0.5.1.md) | 2026-10-17 | Coolify-style two-step delete: cleanup options (volumes, networks, config, Docker cleanup) and type-the-name confirmation |

@@ -129,7 +129,13 @@ engine on the server; only the panel's *own process* runs without it.
                        PANEL_ADDR, DATA_DIR (+ DOCKER_HOST in Docker mode)
   data/                SQLite database, build logs, deploy workspaces
   docker-compose.yml   copy included in release tarballs (used by the
-                       Docker fallback, harmless otherwise)
+                       Docker fallback, harmless otherwise). Since 0.6.2 the
+                       compose file no longer includes a Traefik service: the
+                       panel deploys and owns the proxy itself. If an older
+                       install still has the compose Traefik running on ports
+                       80/443, remove it once: `docker compose -p meghify up
+                       -d --remove-orphans` (or
+                       `docker rm -f $(docker ps -aqf name=traefik)`)
   .env.example         reference copy
   repo/                only in the Docker source fallback: the source tree
 /etc/systemd/system/meghify.service    in systemd modes

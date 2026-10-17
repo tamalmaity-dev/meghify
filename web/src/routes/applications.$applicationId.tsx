@@ -686,7 +686,7 @@ function DomainsCard({
     onSuccess: async () => {
       setDialogOpen(false);
       toast.success(
-        editing ? "Domain updated — redeploy to apply" : "Domain added — redeploy to attach it",
+        editing ? "Domain updated — applied to the proxy immediately" : "Domain added — already routed",
       );
       await invalidate();
     },
@@ -703,7 +703,7 @@ function DomainsCard({
     mutationFn: (enabled: boolean) =>
       api.put<Application>(`/applications/${applicationId}`, applicationPayload(app, { redirectHttps: enabled })),
     onSuccess: async () => {
-      toast.success("Redirect setting saved — redeploy to apply");
+      toast.success("Redirect setting saved — applied to the proxy immediately");
       await invalidate();
     },
     onError: (error) => toast.error(errorText(error)),
@@ -1809,17 +1809,17 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
 
       <Card>
         <CardHeader>
-          <CardTitle>Container labels</CardTitle>
+          <CardTitle>Proxy routing</CardTitle>
           <span className="text-[11px] text-black/40 dark:text-white/35">
-            attached on the next deploy
+            the config Traefik serves now — domain edits apply instantly
           </span>
         </CardHeader>
         <CardContent>
           {labels.isLoading ? (
-            <p className="text-[12px] text-black/45 dark:text-white/40">Loading labels…</p>
+            <p className="text-[12px] text-black/45 dark:text-white/40">Loading routing…</p>
           ) : (
             <pre className="max-h-72 overflow-auto rounded-md bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-white/75">
-              {(labels.data ?? []).join("\n") || "no labels"}
+              {(labels.data ?? []).join("\n") || "no routing"}
             </pre>
           )}
         </CardContent>

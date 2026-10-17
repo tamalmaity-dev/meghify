@@ -1,8 +1,9 @@
-# The panel ships as two services: the control plane and Traefik.
-#
-# Traefik is the default proxy because it reads routing rules straight off
-# container labels, which means the panel only has to set labels when it creates a
-# container. Routing and TLS then happen with no proxy API calls.
+# The panel ships as the control plane service. The reverse proxy is NOT part
+# of the compose file: the panel deploys and owns `meghify-proxy` itself (with
+# the file-provider dynamic routing described in docs/deployments.md), exactly
+# as it does on systemd installs, so domain routing follows one code path no
+# matter how the panel runs. Remove-then-recreate of that proxy is harmless:
+# certificates and routing files live in named volumes.
 
 services:
   meghify:
@@ -35,38 +36,13 @@ services:
     ports:
       - "${APP_PORT:-8080}:8080"
     networks: [meghify]
-    # No healthcheck is needed for the panel itself: Traefik would be the one to
-    # probe it, and the API exposes /api/health for an external check.
+    # No healthcheck is needed for the panel itself: the entrypoint is the
+    # API, which exposes /api/health for an external check.
     security_opt:
       - no-new-privileges:true
 
-  traefik:
-    image: traefik:${TRAEFIK_VERSION:-v3.7}
-    restart: unless-stopped
-    command:
-      - "--api.dashboard=false"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      # The panel's containers are on the panel network; label opt-in makes
-      # Traefik ignore everything else on the host.
-      - "--providers.docker.network=meghify"
-      - "--entrypoints.http.address=:80"
-      - "--entrypoints.https.address=:443"
-      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--entrypoints.http.http.redirections.permanent=true"
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-letsencrypt:/letsencrypt
-    networks: [meghify]
-
 volumes:
   meghify-data:
-  traefik-letsencrypt:
 
 networks:
   meghify:

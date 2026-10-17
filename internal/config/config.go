@@ -88,7 +88,7 @@ type Config struct {
 	// DeployTimeout bounds a whole deployment (queue wait excluded): build,
 	// image transfer, release and health checks. A stuck build is stopped and
 	// the deployment fails instead of holding the queue forever.
-	DeployTimeout time.Duration `env:"DEPLOY_TIMEOUT" envDefault:"30m"`
+	DeployTimeout time.Duration `env:"DEPLOY_TIMEOUT" envDefault:"45m"`
 
 	// ProxyImage is the reverse proxy (Traefik) the panel deploys on demand
 	// for applications with domains. Empty disables proxy management. Traefik

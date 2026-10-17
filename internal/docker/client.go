@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
@@ -771,6 +772,25 @@ func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
 			return nil
 		}
 		return fmt.Errorf("remove network: %w", err)
+	}
+	return nil
+}
+
+// EnsureVolume creates a named volume when it does not exist and returns nil.
+// Dynamic proxy configuration lives in one: the file a deployment writes
+// through the Docker copy API survives proxy recreations, no matter where the
+// panel itself runs.
+func (c *Client) EnsureVolume(ctx context.Context, name string) error {
+	if _, err := c.cli.VolumeInspect(ctx, name); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return fmt.Errorf("inspect volume %s: %w", name, err)
+	}
+	if _, err := c.cli.VolumeCreate(ctx, volume.CreateOptions{
+		Name:   name,
+		Labels: map[string]string{"meghify.managed": "true"},
+	}); err != nil {
+		return fmt.Errorf("create volume %s: %w", name, err)
 	}
 	return nil
 }

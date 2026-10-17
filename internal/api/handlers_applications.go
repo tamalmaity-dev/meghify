@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -387,6 +386,7 @@ func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r.Context(), r, "application.delete", "application", id, result)
+	s.clearRoutes(r.Context(), id)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -407,6 +407,28 @@ func removablePath(path string) bool {
 
 // --- domains ---
 
+// syncRoutes pushes the application's routing file to the proxy; failures are
+// logged, never fatal — the proxy keeps serving the last good file until a
+// following edit or boot reconcile fixes it.
+func (s *Server) syncRoutes(ctx context.Context, appID string) {
+	if s.pipeline == nil {
+		return
+	}
+	if err := s.pipeline.SyncApplicationRoutes(ctx, appID); err != nil {
+		s.logger.Warn("route sync failed", "application", appID, "error", err)
+	}
+}
+
+// clearRoutes empties an application's routing file after a delete.
+func (s *Server) clearRoutes(ctx context.Context, appID string) {
+	if s.pipeline == nil {
+		return
+	}
+	if err := s.pipeline.ClearApplicationRoutes(ctx, appID); err != nil {
+		s.logger.Warn("route clear failed", "application", appID, "error", err)
+	}
+}
+
 // applicationLabels renders the container labels the next deployment attaches,
 // so the UI can show the proxy wiring the way Coolify's label viewer does.
 func (s *Server) applicationLabels(w http.ResponseWriter, r *http.Request) {
@@ -421,17 +443,8 @@ func (s *Server) applicationLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	labels := deploy.ProxyLabels(app, domains, s.cfg.ACMEEmail != "")
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	lines := make([]string, 0, len(keys))
-	for _, key := range keys {
-		lines = append(lines, key+"="+labels[key])
-	}
+	yaml := deploy.DynamicConfigYAML(app, domains, s.cfg.ACMEEmail != "")
+	lines := strings.Split(strings.TrimRight(yaml, "\n"), "\n")
 	writeJSON(w, http.StatusOK, lines)
 }
 
@@ -500,6 +513,9 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 	s.store.Applications.UpdateApplication(r.Context(), app)
 
 	s.audit(r.Context(), r, "domain.create", "domain", domain.ID, map[string]any{"host": host})
+	// File-based routing: the new route goes live immediately, without a
+	// redeployment.
+	s.syncRoutes(r.Context(), appID)
 	writeJSON(w, http.StatusCreated, domain)
 }
 
@@ -547,6 +563,7 @@ func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r.Context(), r, "domain.update", "domain", domain.ID, nil)
+	s.syncRoutes(r.Context(), domain.ApplicationID)
 	writeJSON(w, http.StatusOK, domain)
 }
 
@@ -620,10 +637,16 @@ func (s *Server) suggestDomain(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "domainID")
+	domain, err := s.store.Applications.DomainByID(r.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
 	if err := s.store.Applications.DeleteDomain(r.Context(), id); err != nil {
 		mapError(w, err)
 		return
 	}
+	s.syncRoutes(r.Context(), domain.ApplicationID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

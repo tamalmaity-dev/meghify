@@ -196,6 +196,11 @@ func run() error {
 
 	runner.Start(ctx)
 
+	// Domain routing lives in the proxy's dynamic configuration files. Rewrite
+	// them from the database at boot so a panel upgrade (new proxy generation)
+	// or an edit that raced a restart never leaves routing stale.
+	go pipeline.ReconcileRoutes(ctx, logger.Info)
+
 	go func() {
 		logger.Info("panel listening", "url", cfg.PublicURL, "addr", cfg.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

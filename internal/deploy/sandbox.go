@@ -50,6 +50,17 @@ func (p *Pipeline) ensureSandbox(ctx context.Context, sink io.Writer) (*sandboxI
 		return nil, err
 	}
 	dockerName := docker.ManagedName(sandboxName)
+	// Explicit BUILD_CPU_LIMIT / BUILD_MEMORY_LIMIT values are enforced by
+	// recreating the daemon when a running sandbox no longer matches them;
+	// the build cache volume survives the recreation. Auto limits (half of
+	// this node) are only applied at creation so a host resize never restarts
+	// the daemon under a running build.
+	if container != nil && p.sandboxLimitDrift(ctx, container.ID) {
+		sink.Write([]byte("[*] reapplying the build sandbox limits (the build cache is kept)\n"))
+		_ = p.client.StopContainer(ctx, container.ID, 10*time.Second)
+		_ = p.client.RemoveContainer(ctx, container.ID)
+		container = nil
+	}
 	if container == nil {
 		if ok, _ := p.client.ImageExists(ctx, p.sandboxImage); !ok {
 			sink.Write([]byte("[*] pulling the build sandbox image " + p.sandboxImage + "\n"))
@@ -170,6 +181,13 @@ func (p *Pipeline) sandboxLimits(ctx context.Context) (float64, int64) {
 	}
 	if cpu <= 0 {
 		cpu = float64(info.NCPU) / 2
+		// Small nodes: the panel idles at a few percent of a core and builds
+		// run one at a time (BUILD_CONCURRENCY), so giving the single active
+		// build the whole node beats dragging a half-core build out until the
+		// deployment timeout kills it.
+		if cpu < 2 && info.NCPU >= 2 {
+			cpu = 2
+		}
 		if cpu < 1 {
 			cpu = 1
 		}
@@ -187,6 +205,25 @@ func (p *Pipeline) sandboxLimits(ctx context.Context) (float64, int64) {
 		}
 	}
 	return cpu, memory
+}
+
+// sandboxLimitDrift reports whether an existing sandbox's limits differ from
+// explicitly configured ones (BUILD_CPU_LIMIT, BUILD_MEMORY_LIMIT).
+func (p *Pipeline) sandboxLimitDrift(ctx context.Context, id string) bool {
+	if p.buildCPULimit <= 0 && p.buildMemoryLimit <= 0 {
+		return false
+	}
+	info, err := p.client.InspectContainer(ctx, id)
+	if err != nil || info.HostConfig == nil {
+		return false
+	}
+	if p.buildCPULimit > 0 && float64(info.HostConfig.NanoCPUs)/1e9 != p.buildCPULimit {
+		return true
+	}
+	if p.buildMemoryLimit > 0 && info.HostConfig.Memory != p.buildMemoryLimit {
+		return true
+	}
+	return false
 }
 
 func sandboxLimitText(cpu float64, memory int64) string {

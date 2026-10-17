@@ -46,12 +46,15 @@ panel ──> helper container ──> build sandbox (meghify-buildd, limited CP
 - The sandbox is a `docker:29-dind` container (override with
   `BUILD_SANDBOX_IMAGE`) holding a private image cache in the
   `meghify-build-cache` volume, on its own `meghify-build` network.
-- It is **resource-limited**: `BUILD_CPU_LIMIT` and `BUILD_MEMORY_LIMIT`, and
-  when unset, **half of the node** (at least one core and 1 GiB, at most four
-  cores and 8 GiB) is reserved for builds. No matter what a build does, the
-  panel, the proxy and the running applications keep their share. The limits
-  are logged at sandbox creation; recreating the container (`docker rm -f
-  meghify-buildd`) re-reads them after a configuration change.
+- It is **resource-limited**: `BUILD_CPU_LIMIT` and `BUILD_MEMORY_LIMIT`.
+  When unset, the limits adapt to the node: builds get **half of the node,
+  at least two cores on a two-plus-core machine** and 1 GiB–8 GiB of RAM
+  (half). The only single active build uses the whole small node, which keeps
+  builds from dragging out until the deploy timeout on 2-core VPSes. Explicit
+  overrides are enforced: when a running sandbox no longer matches
+  `BUILD_CPU_LIMIT`/`BUILD_MEMORY_LIMIT`, the next deployment recreates it
+  (the `meghify-build-cache` volume survives, so nothing cold-builds). Limits
+  are logged at sandbox creation.
 - The built image is transferred to the host engine with a compressed
   `docker save`/`docker load` before the release step.
 - Docker Compose stacks are the exception: `docker compose up` must create
@@ -100,7 +103,7 @@ container inherits the same caps.
 
 ### Stuck builds cannot hang the panel
 
-A deployment is bounded by `DEPLOY_TIMEOUT` (default **30m**, covering build,
+A deployment is bounded by `DEPLOY_TIMEOUT` (default **45m**, covering build,
 image transfer, release and health checks). Coolify uses the same idea (a
 one-hour queue job timeout, configurable per server). When the deadline hits,
 the helper container is removed — which kills the build process with it — and
@@ -168,19 +171,38 @@ Each domain carries its own routing options, edited from the Domains card:
 | **Search indexing** | off adds an `X-Robots-Tag: none` middleware |
 | **DNS status** | **Check All DNS** (or the row's check) resolves the host and compares it with the server's public address: *DNS matches*, *DNS mismatch* or *Not checked* |
 
-Routing labels are generated per domain in the Coolify layout — paired
-`http-<app>-<n>` / `https-<app>-<n>` routers with per-domain services, `gzip`,
-the `redirect-to-https` middleware and, when `ACME_EMAIL` is configured, the
-`letsencrypt` certificate resolver. Re-deploy the application to attach label
-changes to the running container.
+Routing is a **dynamic configuration file per application**, served through
+Traefik's file provider — the architecture Dokploy uses. The panel drafts the
+file from the Domains card's rows and copies it into the running proxy through
+the Docker API: paired `https-<app>-<n>` / `http-<app>-<n>` routers with
+per-domain services that address the application container by its stable name
+(`meghify-<app>:<port>`), `gzip`, the per-domain redirect middleware, the
+optional `X-Robots-Tag: none` header and — when `ACME_EMAIL` is configured —
+the `letsencrypt` certificate resolver.
+
+Two consequences worth knowing:
+
+- **Domain edits apply immediately**, without redeploying: change a path,
+  port, protocol or redirect and the route flips in place while the container
+  keeps running.
+- Routing also **does not depend on a deploy finishing**. Until the replacement
+  container is confirmed, the old release (or nothing at all) sits behind the
+  route, so a missing container answers Traefik's `502 Bad Gateway` rather than
+  the bare "404 page not found" the old label-based routing produced.
+
+Routers and middlewares live in the proxy's `meghify-proxy-cfg` volume, so the
+files survive proxy recreations and restarts.
 
 ## The reverse proxy
 
 Domains are served by a Traefik instance the panel deploys on demand: the
 first deployment of an application that has domains ensures `meghify-proxy`
-runs, joins the application to the shared `meghify` network, and attaches the
-routing labels. Docker-compose installs ship Traefik with the panel; systemd
-installs get it created here on first use.
+runs with the file provider watching `/etc/traefik/dynamic` (the routing
+volume), joins the application to the shared `meghify` network, and uploads
+the routing snapshot. Docker-compose installs ship Traefik with the panel;
+systemd installs get it created here on first use. A proxy from an older
+panel generation is recreated automatically on the next deploy or panel
+restart.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -193,7 +215,7 @@ the deployment still succeeds and says so in the log; the application keeps
 its published ports.
 
 The proxy's entrypoints are named `http` (port 80) and `https` (port 443),
-matching the router labels.
+matching the router definitions in each application's dynamic file.
 
 ## Credentials
 
@@ -215,8 +237,8 @@ finishes.
   **Stream live**, a tail selector (100 / 500 / 2000 / all), find-in-logs and
   download.
 - **Networking** — the container port the proxy routes to, published
-  `hostPort:containerPort` mappings, and the container labels the next
-  deployment attaches (read-only).
+  `hostPort:containerPort` mappings, and the routing configuration the proxy
+  serves (read-only; it updates immediately when the Domains card changes).
 - **Runtime** — CPU and memory ceilings for the container, and the
   pre/post-deployment command hooks.
 - **Danger zone** — a two-step delete: pick the cleanup options (volumes,
