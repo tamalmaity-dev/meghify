@@ -71,6 +71,12 @@ Installed the app directly from `github.com/settings/apps` instead? Press
 **Refresh** on Sources (or in the repository picker) and the panel pulls the
 installation list from GitHub.
 
+The Sources page shows one card per app: a green **Connected** badge once it is
+installed, **Not installed** when the app is registered but no account has
+installed it yet, and **Setup incomplete** until GitHub issues the credentials.
+Open a card for its **General** details (App ID, installation ids, HTML/API
+URLs, masked secrets) and its installations.
+
 ## 4. Deploy from a repository
 
 In a project, press **New resource** and pick **Git Repository (with GitHub
@@ -81,11 +87,15 @@ App)**:
    as the Sources page without leaving the flow, **Finish setup** resumes an
    incomplete source, and a source with no installation yet offers **Install on
    GitHub** (grant access over there, then press **Refresh**).
-2. **Choose a repository** — pick the account the app is installed on, then
+2. **Choose repository** — pick the account the app is installed on, then
    search the list GitHub returned, including private ones.
-3. The application form opens prefilled: repository URL, default branch,
-   Nixpacks as the build pack, and **Deploy automatically on every push**
-   checked. Adjust what you like and press **Create**.
+3. **Build configuration** — the repository card and its fields are prefilled:
+   branch, build pack (Nixpacks by default), base directory, port and health
+   check path. **Deploy automatically on every push** is checked; press
+   **Create**.
+
+The application clones through the installation token, so private repositories
+work without deploy keys or stored SSH credentials.
 
 The application clones through the installation token, so private repositories
 work without deploy keys or stored SSH credentials.
