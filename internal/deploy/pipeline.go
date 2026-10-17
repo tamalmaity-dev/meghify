@@ -54,6 +54,12 @@ type Options struct {
 	HelperImage string
 	// HelperSocket is the docker socket path mounted into the helper.
 	HelperSocket string
+	// BuildConcurrency caps concurrent builds; values below 1 mean 1.
+	BuildConcurrency int
+	// BuildCPULimit and BuildMemoryLimit bound each build helper container.
+	// Zero values leave the engine defaults.
+	BuildCPULimit    float64
+	BuildMemoryLimit int64
 }
 
 // Payload is the job body carried by a deploy job.
@@ -75,23 +81,36 @@ type Pipeline struct {
 	helperImage  string
 	helperSocket string
 
+	// buildGate serialises builds so a small server finishes one deployment
+	// before the next begins.
+	buildGate        chan struct{}
+	buildCPULimit    float64
+	buildMemoryLimit int64
+
 	mu      sync.Mutex
 	running map[string]struct{}
 }
 
 // NewPipeline builds a pipeline.
 func NewPipeline(opts Options) *Pipeline {
+	concurrency := opts.BuildConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
 	return &Pipeline{
-		store:        opts.Store,
-		secrets:      opts.Secrets,
-		client:       opts.Client,
-		dataDir:      opts.DataDir,
-		registry:     opts.Registry,
-		emitter:      opts.Emitter,
-		git:          opts.GitToken,
-		helperImage:  opts.HelperImage,
-		helperSocket: opts.HelperSocket,
-		running:      map[string]struct{}{},
+		store:            opts.Store,
+		secrets:          opts.Secrets,
+		client:           opts.Client,
+		dataDir:          opts.DataDir,
+		registry:         opts.Registry,
+		emitter:          opts.Emitter,
+		git:              opts.GitToken,
+		helperImage:      opts.HelperImage,
+		helperSocket:     opts.HelperSocket,
+		buildGate:        make(chan struct{}, concurrency),
+		buildCPULimit:    opts.BuildCPULimit,
+		buildMemoryLimit: opts.BuildMemoryLimit,
+		running:          map[string]struct{}{},
 	}
 }
 
@@ -140,6 +159,24 @@ func (p *Pipeline) Run(ctx context.Context, payload Payload) error {
 	}
 
 	writer := newTeeWriter(logFile, p.emitter, deployment.ID)
+	if err := p.store.Deployments.SetDeploymentLogPath(ctx, deployment.ID, logPath); err != nil {
+		return err
+	}
+
+	// One build at a time by default: builds are CPU-heavy, and a small
+	// server should digest one before starting the next.
+	select {
+	case p.buildGate <- struct{}{}:
+	default:
+		writer.Write([]byte("[*] waiting for another build to finish\n"))
+		select {
+		case p.buildGate <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	defer func() { <-p.buildGate }()
+
 	p.store.Deployments.StartDeployment(ctx, deployment.ID, "")
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusDeploying)
 	p.emit(app.ID, deployment.ID, "started", "")

@@ -87,7 +87,6 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/api/health", s.health)
 	r.Get("/api/version", s.versionInfo)
-	s.hub.Mount(r)
 
 	// GitHub delivers app webhooks straight to the panel. Those requests are
 	// authenticated by the app's webhook signature, not a session cookie, so
@@ -119,6 +118,11 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/me/totp", s.totpDisable)
 		r.Get("/stats", s.stats)
 		r.Get("/search", s.search)
+
+		// SSE lives behind the session gate: build output can quote source
+		// paths and environment names, so anonymous listeners have no business
+		// replaying it.
+		s.hub.Mount(r)
 
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/", s.listUsers)

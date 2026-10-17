@@ -33,6 +33,10 @@ func (s *Server) deployApplication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Applications created before automatic domains existed get their sslip.io
+	// address on their first deploy.
+	s.ensureDefaultDomain(r.Context(), app)
+
 	deployment, err := s.queueDeployment(r.Context(), app, db.TriggerManual, req.NoCache, "", "")
 	switch {
 	case errors.Is(err, errDeploymentRunning):

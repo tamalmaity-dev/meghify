@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/db"
@@ -110,11 +115,28 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// No domain configured? Register an sslip.io address that points at this
+	// server, so the first deploy is reachable without any DNS work.
+	autoAssigned := false
+	if app.FQDN == "" {
+		if host := s.defaultDomain(r.Context(), app); host != "" {
+			app.FQDN = host
+			autoAssigned = true
+		}
+	}
 	if err := s.store.Applications.CreateApplication(r.Context(), app); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	if app.FQDN != "" {
+	if autoAssigned {
+		s.store.Applications.CreateDomain(r.Context(), &db.Domain{
+			ID:            db.NewID(),
+			ApplicationID: app.ID,
+			Host:          app.FQDN,
+			TLSEnabled:    false,
+			CertStatus:    "pending",
+		})
+	} else if app.FQDN != "" {
 		s.attachDomain(r, app.ID, app.FQDN)
 	}
 	s.audit(r.Context(), r, "application.create", "application", app.ID, nil)
@@ -308,6 +330,104 @@ func (s *Server) attachDomain(r *http.Request, appID, host string) {
 
 func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSpace(host))
+}
+
+// --- automatic domains ---
+
+// defaultDomain renders the sslip.io address a fresh application gets when no
+// domain is configured: "<name>-<short-id>.<panel-ip>.sslip.io". sslip.io
+// resolves any subdomain carrying an IP back to it, so http:// works with no
+// DNS setup — the same convenience Coolify offers.
+func (s *Server) defaultDomain(ctx context.Context, app *db.Application) string {
+	ip := s.panelIPv4(ctx)
+	if ip == "" {
+		return ""
+	}
+	shortID := app.ID
+	if len(shortID) > 6 {
+		shortID = shortID[:6]
+	}
+	return fmt.Sprintf("%s-%s.%s.sslip.io", hostSlug(app.Name), shortID, ip)
+}
+
+// panelIPv4 finds the panel's public IPv4: from PANEL_PUBLIC_URL when it holds
+// an address, otherwise by resolving its hostname once.
+func (s *Server) panelIPv4(ctx context.Context) string {
+	public := strings.TrimSpace(s.cfg.PublicURL)
+	host := public
+	if parsed, err := url.Parse(public); err == nil && parsed.Host != "" {
+		host = parsed.Hostname()
+	} else if h, _, err := net.SplitHostPort(public); err == nil {
+		host = h
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String()
+		}
+		return ""
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil {
+		return ""
+	}
+	for _, address := range addresses {
+		if v4 := address.IP.To4(); v4 != nil {
+			return v4.String()
+		}
+	}
+	return ""
+}
+
+// ensureDefaultDomain backfills the automatic address on the first deploy of
+// applications created before automatic domains existed. Once assigned (or
+// deleted by the operator) it is not re-added: FQDN stays set on the record.
+func (s *Server) ensureDefaultDomain(ctx context.Context, app *db.Application) {
+	if app.FQDN != "" {
+		return
+	}
+	domains, err := s.store.Applications.DomainsByApplication(ctx, app.ID)
+	if err != nil || len(domains) > 0 {
+		return
+	}
+	host := s.defaultDomain(ctx, app)
+	if host == "" {
+		return
+	}
+	app.FQDN = host
+	if err := s.store.Applications.UpdateApplication(ctx, app); err != nil {
+		return
+	}
+	s.store.Applications.CreateDomain(ctx, &db.Domain{
+		ID:            db.NewID(),
+		ApplicationID: app.ID,
+		Host:          host,
+		TLSEnabled:    false,
+		CertStatus:    "pending",
+	})
+}
+
+// hostSlug lowercases a name into something a hostname accepts.
+func hostSlug(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "app"
+	}
+	if len(out) > 40 {
+		out = strings.Trim(out[:40], "-")
+	}
+	return out
 }
 
 // --- env vars ---

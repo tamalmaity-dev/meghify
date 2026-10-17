@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -123,10 +124,13 @@ func run() error {
 			User: cfg.RegistryUser,
 			Pass: cfg.RegistryPass,
 		},
-		Emitter:      hub,
-		GitToken:     gitHubCredential(store, authService, logger),
-		HelperImage:  cfg.BuildHelperImage,
-		HelperSocket: dockerSocketPath(cfg.DockerHost),
+		Emitter:          hub,
+		GitToken:         gitHubCredential(store, authService, logger),
+		HelperImage:      resolvedHelperImage(cfg),
+		HelperSocket:     dockerSocketPath(cfg.DockerHost),
+		BuildConcurrency: cfg.BuildConcurrency,
+		BuildCPULimit:    cfg.BuildCPULimit,
+		BuildMemoryLimit: parseByteSize(cfg.BuildMemoryLimit),
 	})
 
 	runner := jobs.NewRunner(jobs.Options{
@@ -294,6 +298,42 @@ func dockerSocketPath(host string) string {
 		return strings.TrimPrefix(host, "unix://")
 	}
 	return "/var/run/docker.sock"
+}
+
+// resolvedHelperImage picks the build helper image: BUILD_HELPER_IMAGE wins,
+// otherwise the image published for this exact panel release. Development
+// builds fall back to :latest.
+func resolvedHelperImage(cfg *config.Config) string {
+	if image := strings.TrimSpace(cfg.BuildHelperImage); image != "" {
+		return image
+	}
+	tag := strings.TrimPrefix(version.Version, "v")
+	if tag == "" || tag == "dev" {
+		return "ghcr.io/tamalmaity-dev/meghify-helper:latest"
+	}
+	return "ghcr.io/tamalmaity-dev/meghify-helper:v" + tag
+}
+
+// parseByteSize converts "512m", "2g" or a plain byte count into bytes.
+func parseByteSize(value string) int64 {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return 0
+	}
+	multiplier := int64(1)
+	switch value[len(value)-1] {
+	case 'k':
+		multiplier, value = 1<<10, value[:len(value)-1]
+	case 'm':
+		multiplier, value = 1<<20, value[:len(value)-1]
+	case 'g':
+		multiplier, value = 1<<30, value[:len(value)-1]
+	}
+	number, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || number < 0 {
+		return 0
+	}
+	return number * multiplier
 }
 
 // gitHubCredential mints installation tokens for applications linked to a

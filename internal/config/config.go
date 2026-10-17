@@ -57,12 +57,20 @@ type Config struct {
 
 	DockerHost string `env:"DOCKER_HOST" envDefault:"unix:///var/run/docker.sock"`
 
-	// BuildHelperImage is the container image that runs git, buildpack
-	// (nixpacks/railpack) and compose commands during a deployment. It needs
-	// git, the buildpack binaries and the docker CLI, and it talks to the same
-	// engine through the mounted socket. Keeping those tools out of the panel
-	// is what lets the panel itself run from a distroless image.
-	BuildHelperImage string `env:"BUILD_HELPER_IMAGE" envDefault:"coollabsio/coolify-helper:1.0.17"`
+	// BuildHelperImage overrides the build helper image. Empty picks the
+	// image published for this exact panel release
+	// (ghcr.io/tamalmaity-dev/meghify-helper:<version>).
+	BuildHelperImage string `env:"BUILD_HELPER_IMAGE"`
+
+	// BuildConcurrency caps how many deployments may build at the same time.
+	// Builds are CPU-heavy; one at a time keeps a small server responsive.
+	BuildConcurrency int `env:"BUILD_CONCURRENCY" envDefault:"1"`
+
+	// BuildCPULimit caps a build helper container's CPU (fraction of one
+	// core); zero keeps the engine default. BuildMemoryLimit accepts bytes or
+	// a suffix like 512m / 2g; empty keeps the engine default.
+	BuildCPULimit    float64 `env:"BUILD_CPU_LIMIT" envDefault:"0"`
+	BuildMemoryLimit string  `env:"BUILD_MEMORY_LIMIT"`
 
 	// Registry is where built application images are pushed.
 	RegistryURL  string `env:"REGISTRY_URL" envDefault:""`
@@ -134,6 +142,9 @@ func (c *Config) validate() error {
 	}
 	if c.JobMaxAttempts <= 0 {
 		return errors.New("JOB_MAX_ATTEMPTS must be at least 1")
+	}
+	if c.BuildConcurrency < 1 {
+		return errors.New("BUILD_CONCURRENCY must be at least 1")
 	}
 	return nil
 }

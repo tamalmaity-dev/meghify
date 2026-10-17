@@ -95,8 +95,10 @@ export function formatBytes(bytes: number | undefined): string {
 }
 
 /**
- * Opens an SSE stream and yields decoded events. Reconnects with backoff because
- * proxies and laptops drop connections constantly.
+ * Opens an SSE stream and yields decoded event payloads. The server frames
+ * every event as {"channel", "payload", "at"}; the payload is what consumers
+ * care about. Reconnects with backoff because proxies and laptops drop
+ * connections constantly.
  */
 export async function* streamEvents(
   path: string,
@@ -125,7 +127,12 @@ export async function* streamEvents(
           buffer = buffer.slice(index + 2);
           if (frame.startsWith("data: ")) {
             try {
-              yield JSON.parse(frame.slice(6)) as Record<string, unknown>;
+              const envelope = JSON.parse(frame.slice(6)) as Record<string, unknown>;
+              const payload =
+                envelope && typeof envelope === "object" && "payload" in envelope
+                  ? (envelope.payload as Record<string, unknown>)
+                  : envelope;
+              yield payload;
             } catch {
               // A malformed frame is skipped; the next one usually arrives fine.
             }

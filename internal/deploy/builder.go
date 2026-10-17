@@ -64,11 +64,13 @@ func (p *Pipeline) newBuilder(ctx context.Context, sink io.Writer, app *db.Appli
 	}
 
 	id, err := p.client.CreateContainer(ctx, &docker.ContainerSpec{
-		Name:    name,
-		Image:   p.helperImage,
-		Cmd:     []string{"sh", "-c", "while true; do sleep 3600; done"},
-		Labels:  map[string]string{"meghify.role": "build-helper"},
-		Volumes: mounts,
+		Name:        name,
+		Image:       p.helperImage,
+		Cmd:         []string{"sh", "-c", "while true; do sleep 3600; done"},
+		Labels:      map[string]string{"meghify.role": "build-helper"},
+		Volumes:     mounts,
+		MemoryLimit: p.buildMemoryLimit,
+		CPULimit:    p.buildCPULimit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errHelperUnavailable, err)
