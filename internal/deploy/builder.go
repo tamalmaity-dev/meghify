@@ -47,7 +47,7 @@ func (p *Pipeline) newBuilder(ctx context.Context, sink io.Writer, app *db.Appli
 
 	if ok, _ := p.client.ImageExists(ctx, p.helperImage); !ok {
 		sink.Write([]byte("[*] pulling the build helper image " + p.helperImage + "\n"))
-		if err := p.client.PullImage(ctx, p.helperImage, sink); err != nil {
+		if err := p.client.PullImageRetry(ctx, p.helperImage, sink); err != nil {
 			return nil, fmt.Errorf("%w: pull %s: %v", errHelperUnavailable, p.helperImage, err)
 		}
 	}

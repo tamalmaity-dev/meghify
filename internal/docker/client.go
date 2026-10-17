@@ -554,6 +554,21 @@ func (c *Client) PullImage(ctx context.Context, ref string, sink io.Writer) erro
 	return nil
 }
 
+// PullImageRetry pulls an image, retrying once on failure. Engines with the
+// containerd image store (Docker 29's default) occasionally abort the final
+// layer commit of a pull ("failed commit on ref … no such file"); the retry
+// finds every blob already in the store and completes in seconds.
+func (c *Client) PullImageRetry(ctx context.Context, ref string, sink io.Writer) error {
+	err := c.PullImage(ctx, ref, sink)
+	if err == nil {
+		return nil
+	}
+	if sink != nil {
+		sink.Write([]byte("[!] " + ref + " pull failed, retrying once: " + err.Error() + "\n"))
+	}
+	return c.PullImage(ctx, ref, sink)
+}
+
 // ListImages returns images present on the node.
 func (c *Client) ListImages(ctx context.Context) ([]image.Summary, error) {
 	list, err := c.cli.ImageList(ctx, image.ListOptions{All: true})

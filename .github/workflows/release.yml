@@ -131,6 +131,11 @@ jobs:
           file: helper/Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
+          # No provenance or SBOM attestations: they add duplicate manifests
+          # that trip the containerd image store's layer-commit path on some
+          # engines during a pull.
+          provenance: false
+          sbom: false
           tags: |
             ghcr.io/tamalmaity-dev/meghify-helper:${{ github.ref_name }}
             ghcr.io/tamalmaity-dev/meghify-helper:latest

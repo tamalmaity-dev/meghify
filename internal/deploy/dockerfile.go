@@ -238,7 +238,7 @@ func (p *Pipeline) runImage(ctx context.Context, sink io.Writer, app *db.Applica
 		return fmt.Errorf("applications with build pack %q need gitRepository to hold the image reference", db.BuildImage)
 	}
 	sink.Write([]byte("[1/4] pulling " + imageRef + "\n"))
-	if err := p.client.PullImage(ctx, imageRef, sink); err != nil {
+	if err := p.client.PullImageRetry(ctx, imageRef, sink); err != nil {
 		return err
 	}
 	return p.release(ctx, sink, app, imageRef)

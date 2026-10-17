@@ -134,7 +134,7 @@ func ensureTerminalHelper(ctx context.Context, client *docker.Client) (*docker.E
 	}
 	if container == nil {
 		if ok, _ := client.ImageExists(ctx, terminalHelperImage); !ok {
-			if err := client.PullImage(ctx, terminalHelperImage, io.Discard); err != nil {
+			if err := client.PullImageRetry(ctx, terminalHelperImage, io.Discard); err != nil {
 				return nil, fmt.Errorf("pull terminal image: %w", err)
 			}
 		}
