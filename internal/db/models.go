@@ -213,6 +213,9 @@ type Application struct {
 	// PortMappings publishes container ports on the host, e.g. "8080:3000".
 	// A single mapping or a comma-separated list.
 	PortMappings string `json:"portMappings"`
+	// RedirectHTTPS is the default for the application's TLS domains: plain
+	// HTTP requests are redirected to https.
+	RedirectHTTPS bool `json:"redirectHttps"`
 	// CPULimit (fraction of one core) and MemoryLimit (bytes) cap the running
 	// container. Zero keeps the engine default.
 	CPULimit    float64 `json:"cpuLimit"`
@@ -290,12 +293,25 @@ type EnvVar struct {
 
 // Domain routes traffic to an application.
 type Domain struct {
-	ID            string    `json:"id"`
-	ApplicationID string    `json:"applicationId"`
-	Host          string    `json:"host"`
-	TLSEnabled    bool      `json:"tlsEnabled"`
-	CertStatus    string    `json:"certStatus"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string `json:"id"`
+	ApplicationID string `json:"applicationId"`
+	Host          string `json:"host"`
+	TLSEnabled    bool   `json:"tlsEnabled"`
+	CertStatus    string `json:"certStatus"`
+	// Path scopes the router rule, e.g. /api/v3; empty means every path.
+	Path string `json:"path"`
+	// Port overrides the internal port this domain routes to; zero uses the
+	// application's port.
+	Port int `json:"port"`
+	// RedirectHTTPS sends plain-HTTP requests for this host to https.
+	RedirectHTTPS bool `json:"redirectHttps"`
+	// SearchIndexing controls whether crawlers may index the domain.
+	SearchIndexing bool `json:"searchIndexing"`
+	// DNSStatus is the cached outcome of the last DNS check:
+	// "matches", "mismatch" or "" (never checked).
+	DNSStatus    string     `json:"dnsStatus"`
+	DNSCheckedAt *time.Time `json:"dnsCheckedAt,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
 }
 
 // Volume binds persistent storage to a resource.

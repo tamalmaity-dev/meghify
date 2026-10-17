@@ -185,6 +185,10 @@ func (s *Server) Router() http.Handler {
 
 			r.Get("/{id}/domains", s.listDomains)
 			r.Post("/{id}/domains", s.createDomain)
+			r.Post("/{id}/domains/check", s.checkApplicationDomains)
+			r.Get("/{id}/suggest-domain", s.suggestDomain)
+			r.Patch("/domains/{domainID}", s.updateDomain)
+			r.Post("/domains/{domainID}/check", s.checkDomain)
 			r.Delete("/domains/{domainID}", s.deleteDomain)
 
 			r.Get("/{id}/env", s.listEnvVars)

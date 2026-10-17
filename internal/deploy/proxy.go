@@ -49,8 +49,10 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 		"--providers.docker=true",
 		"--providers.docker.exposedbydefault=false",
 		"--providers.docker.network=" + proxyNetwork,
-		"--entrypoints.web.address=:80",
-		"--entrypoints.websecure.address=:443",
+		// Coolify-compatible entrypoint names: the router labels the panel
+		// generates reference http/https.
+		"--entrypoints.http.address=:80",
+		"--entrypoints.https.address=:443",
 	}
 	mounts := make([]docker.Mount, 0, 2)
 	if p.proxyEmail != "" {

@@ -31,6 +31,7 @@ type applicationRequest struct {
 	FQDN          string `json:"fqdn"`
 	// Runtime settings from the Networking and Runtime cards.
 	PortMappings      string  `json:"portMappings"`
+	RedirectHTTPS     *bool   `json:"redirectHttps"`
 	CPULimit          float64 `json:"cpuLimit"`
 	MemoryLimit       int64   `json:"memoryLimit"`
 	PreDeployCommand  string  `json:"preDeployCommand"`
@@ -158,6 +159,7 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		FQDN:              strings.ToLower(strings.TrimSpace(req.FQDN)),
 		Status:            db.StatusIdle,
 		PortMappings:      strings.TrimSpace(req.PortMappings),
+		RedirectHTTPS:     req.RedirectHTTPS == nil || *req.RedirectHTTPS,
 		CPULimit:          req.CPULimit,
 		MemoryLimit:       req.MemoryLimit,
 		PreDeployCommand:  strings.TrimSpace(req.PreDeployCommand),
@@ -184,11 +186,13 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	if autoAssigned {
 		s.store.Applications.CreateDomain(r.Context(), &db.Domain{
-			ID:            db.NewID(),
-			ApplicationID: app.ID,
-			Host:          app.FQDN,
-			TLSEnabled:    false,
-			CertStatus:    "pending",
+			ID:             db.NewID(),
+			ApplicationID:  app.ID,
+			Host:           app.FQDN,
+			TLSEnabled:     false,
+			CertStatus:     "pending",
+			RedirectHTTPS:  true,
+			SearchIndexing: true,
 		})
 	} else if app.FQDN != "" {
 		s.attachDomain(r, app.ID, app.FQDN)
@@ -267,6 +271,17 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	existing.MemoryLimit = req.MemoryLimit
 	existing.PreDeployCommand = strings.TrimSpace(req.PreDeployCommand)
 	existing.PostDeployCommand = strings.TrimSpace(req.PostDeployCommand)
+	// The Domains card's "Redirect HTTP to HTTPS" switch is the default for
+	// the application's domains, so changing it applies to the existing ones.
+	if req.RedirectHTTPS != nil && *req.RedirectHTTPS != existing.RedirectHTTPS {
+		existing.RedirectHTTPS = *req.RedirectHTTPS
+		if domains, err := s.store.Applications.DomainsByApplication(r.Context(), existing.ID); err == nil {
+			for _, domain := range domains {
+				domain.RedirectHTTPS = *req.RedirectHTTPS
+				s.store.Applications.UpdateDomain(r.Context(), domain)
+			}
+		}
+	}
 	// Auto-deploy is toggled from the application page; the GitHub linkage
 	// itself is fixed when the application is created.
 	if req.AutoDeploy != nil && existing.GitHubAppID != "" {
@@ -316,7 +331,7 @@ func (s *Server) applicationLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	labels := deploy.ProxyLabels(app, domains)
+	labels := deploy.ProxyLabels(app, domains, s.cfg.ACMEEmail != "")
 	keys := make([]string, 0, len(labels))
 	for key := range labels {
 		keys = append(keys, key)
@@ -340,8 +355,12 @@ func (s *Server) listDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 type domainRequest struct {
-	Host       string `json:"host"`
-	TLSEnabled *bool  `json:"tlsEnabled"`
+	Host           string `json:"host"`
+	TLSEnabled     *bool  `json:"tlsEnabled"`
+	Path           string `json:"path"`
+	Port           int    `json:"port"`
+	RedirectHTTPS  *bool  `json:"redirectHttps"`
+	SearchIndexing *bool  `json:"searchIndexing"`
 }
 
 func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
@@ -355,9 +374,14 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a valid hostname is required")
 		return
 	}
+	if req.Port < 0 || req.Port > 65535 {
+		writeError(w, http.StatusBadRequest, "port must be between 0 and 65535")
+		return
+	}
 
 	appID := chi.URLParam(r, "id")
-	if _, err := s.store.Applications.ApplicationByID(r.Context(), appID); err != nil {
+	app, err := s.store.Applications.ApplicationByID(r.Context(), appID)
+	if err != nil {
 		mapError(w, err)
 		return
 	}
@@ -367,24 +391,141 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	domain := &db.Domain{
-		ID:            db.NewID(),
-		ApplicationID: appID,
-		Host:          host,
-		TLSEnabled:    req.TLSEnabled == nil || *req.TLSEnabled,
-		CertStatus:    "pending",
+		ID:             db.NewID(),
+		ApplicationID:  appID,
+		Host:           host,
+		TLSEnabled:     req.TLSEnabled == nil || *req.TLSEnabled,
+		CertStatus:     "pending",
+		Path:           strings.TrimSpace(req.Path),
+		Port:           req.Port,
+		RedirectHTTPS:  req.RedirectHTTPS == nil || *req.RedirectHTTPS,
+		SearchIndexing: req.SearchIndexing == nil || *req.SearchIndexing,
 	}
 	if err := s.store.Applications.CreateDomain(r.Context(), domain); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	if app, err := s.store.Applications.ApplicationByID(r.Context(), appID); err == nil {
-		app.FQDN = host
-		s.store.Applications.UpdateApplication(r.Context(), app)
-	}
+	app.FQDN = host
+	s.store.Applications.UpdateApplication(r.Context(), app)
 
 	s.audit(r.Context(), r, "domain.create", "domain", domain.ID, map[string]any{"host": host})
 	writeJSON(w, http.StatusCreated, domain)
+}
+
+// updateDomain edits a domain's routing options from the Domains card.
+func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
+	domain, err := s.store.Applications.DomainByID(r.Context(), chi.URLParam(r, "domainID"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+
+	var req domainRequest
+	if err := decode(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		writeError(w, http.StatusBadRequest, "port must be between 0 and 65535")
+		return
+	}
+	if host := normalizeHost(req.Host); host != "" {
+		if host != domain.Host {
+			if existing, err := s.store.Applications.DomainByHost(r.Context(), host); err == nil && existing != nil {
+				writeError(w, http.StatusConflict, "that hostname is already in use")
+				return
+			}
+		}
+		domain.Host = host
+	}
+
+	domain.Path = strings.TrimSpace(req.Path)
+	domain.Port = req.Port
+	if req.TLSEnabled != nil {
+		domain.TLSEnabled = *req.TLSEnabled
+	}
+	if req.RedirectHTTPS != nil {
+		domain.RedirectHTTPS = *req.RedirectHTTPS
+	}
+	if req.SearchIndexing != nil {
+		domain.SearchIndexing = *req.SearchIndexing
+	}
+
+	if err := s.store.Applications.UpdateDomain(r.Context(), domain); err != nil {
+		mapError(w, err)
+		return
+	}
+	s.audit(r.Context(), r, "domain.update", "domain", domain.ID, nil)
+	writeJSON(w, http.StatusOK, domain)
+}
+
+// checkDomain resolves one domain and compares it against the panel's public
+// address, storing the outcome for the DNS-status column.
+func (s *Server) checkDomain(w http.ResponseWriter, r *http.Request) {
+	domain, err := s.store.Applications.DomainByID(r.Context(), chi.URLParam(r, "domainID"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	checked := s.checkDomainDNS(r.Context(), domain)
+	s.audit(r.Context(), r, "domain.dns_check", "domain", checked.ID, map[string]any{"status": checked.DNSStatus})
+	writeJSON(w, http.StatusOK, checked)
+}
+
+// checkApplicationDomains re-checks every domain of an application.
+func (s *Server) checkApplicationDomains(w http.ResponseWriter, r *http.Request) {
+	domains, err := s.store.Applications.DomainsByApplication(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	checked := make([]*db.Domain, 0, len(domains))
+	for _, domain := range domains {
+		checked = append(checked, s.checkDomainDNS(r.Context(), domain))
+	}
+	writeJSON(w, http.StatusOK, checked)
+}
+
+// checkDomainDNS resolves the hostname and records whether it points at this
+// server.
+func (s *Server) checkDomainDNS(ctx context.Context, domain *db.Domain) *db.Domain {
+	host := strings.SplitN(domain.Host, ":", 2)[0]
+	status := "mismatch"
+	want := s.panelIPv4(ctx)
+	if want != "" {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host); err == nil {
+			for _, address := range addresses {
+				if address.IP.String() == want {
+					status = "matches"
+					break
+				}
+			}
+		}
+	}
+	now := time.Now().UTC()
+	domain.DNSStatus = status
+	domain.DNSCheckedAt = &now
+	s.store.Applications.UpdateDomain(ctx, domain)
+	return domain
+}
+
+// suggestDomain proposes the automatic sslip.io address for the Add-domain
+// dialog's "Generate Domain" button.
+func (s *Server) suggestDomain(w http.ResponseWriter, r *http.Request) {
+	app, err := s.store.Applications.ApplicationByID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	host := s.defaultDomain(r.Context(), app)
+	if host == "" {
+		writeError(w, http.StatusServiceUnavailable, "could not determine this server's public address")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"host": host})
 }
 
 func (s *Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
@@ -407,11 +548,13 @@ func (s *Server) attachDomain(r *http.Request, appID, host string) {
 		return
 	}
 	s.store.Applications.CreateDomain(r.Context(), &db.Domain{
-		ID:            db.NewID(),
-		ApplicationID: appID,
-		Host:          normalized,
-		TLSEnabled:    true,
-		CertStatus:    "pending",
+		ID:             db.NewID(),
+		ApplicationID:  appID,
+		Host:           normalized,
+		TLSEnabled:     true,
+		CertStatus:     "pending",
+		RedirectHTTPS:  true,
+		SearchIndexing: true,
 	})
 }
 
@@ -488,11 +631,13 @@ func (s *Server) ensureDefaultDomain(ctx context.Context, app *db.Application) {
 		return
 	}
 	s.store.Applications.CreateDomain(ctx, &db.Domain{
-		ID:            db.NewID(),
-		ApplicationID: app.ID,
-		Host:          host,
-		TLSEnabled:    false,
-		CertStatus:    "pending",
+		ID:             db.NewID(),
+		ApplicationID:  app.ID,
+		Host:           host,
+		TLSEnabled:     false,
+		CertStatus:     "pending",
+		RedirectHTTPS:  true,
+		SearchIndexing: true,
 	})
 }
 

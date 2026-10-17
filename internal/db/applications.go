@@ -17,14 +17,14 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 	q := `INSERT INTO applications (id, environment_id, node_id, name, description, git_repository, git_branch,
 	                                 build_pack, dockerfile, base_directory, port, health_check, status, fqdn,
 	                                 image_tag, github_app_id, github_installation_id, repository_full_name,
-	                                 auto_deploy, port_mappings, cpu_limit, memory_limit, pre_deploy_command,
-	                                 post_deploy_command, created_at, updated_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	                                 auto_deploy, port_mappings, redirect_https, cpu_limit, memory_limit,
+	                                 pre_deploy_command, post_deploy_command, created_at, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
 		a.ID, a.EnvironmentID, NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck, a.Status, a.FQDN,
 		a.ImageTag, NullString(a.GitHubAppID), a.GitHubInstallationID, a.RepositoryFullName,
-		a.AutoDeploy, a.PortMappings, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
+		a.AutoDeploy, a.PortMappings, a.RedirectHTTPS, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
 		a.PostDeployCommand, now, now); err != nil {
 		return fmt.Errorf("insert application: %w", err)
 	}
@@ -35,8 +35,8 @@ func (r *AppRepo) CreateApplication(ctx context.Context, a *Application) error {
 const appColumns = `id, environment_id, node_id, name, description, git_repository, git_branch,
                     build_pack, dockerfile, base_directory, port, health_check, status, fqdn, image_tag,
                     github_app_id, github_installation_id, repository_full_name, auto_deploy,
-                    port_mappings, cpu_limit, memory_limit, pre_deploy_command, post_deploy_command,
-                    created_at, updated_at`
+                    port_mappings, redirect_https, cpu_limit, memory_limit, pre_deploy_command,
+                    post_deploy_command, created_at, updated_at`
 
 func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
 	var a Application
@@ -44,8 +44,8 @@ func scanApp(scanner interface{ Scan(...any) error }) (*Application, error) {
 	err := scanner.Scan(&a.ID, &a.EnvironmentID, &nodeID, &a.Name, &a.Description, &a.GitRepository,
 		&a.GitBranch, &a.BuildPack, &a.Dockerfile, &a.BaseDirectory, &a.Port, &a.HealthCheck,
 		&a.Status, &a.FQDN, &a.ImageTag, &githubAppID, &a.GitHubInstallationID, &a.RepositoryFullName,
-		&a.AutoDeploy, &a.PortMappings, &a.CPULimit, &a.MemoryLimit, &a.PreDeployCommand,
-		&a.PostDeployCommand, &createdAt, &updatedAt)
+		&a.AutoDeploy, &a.PortMappings, &a.RedirectHTTPS, &a.CPULimit, &a.MemoryLimit,
+		&a.PreDeployCommand, &a.PostDeployCommand, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, ErrNotFound
@@ -116,14 +116,14 @@ func (r *AppRepo) UpdateApplication(ctx context.Context, a *Application) error {
 		                        build_pack = ?, dockerfile = ?, base_directory = ?, port = ?, health_check = ?,
 		                        status = ?, fqdn = ?, image_tag = ?, github_app_id = ?,
 		                        github_installation_id = ?, repository_full_name = ?, auto_deploy = ?,
-		                        port_mappings = ?, cpu_limit = ?, memory_limit = ?, pre_deploy_command = ?,
-		                        post_deploy_command = ?, updated_at = ?
+		                        port_mappings = ?, redirect_https = ?, cpu_limit = ?, memory_limit = ?,
+		                        pre_deploy_command = ?, post_deploy_command = ?, updated_at = ?
 		  WHERE id = ?`,
 		NullString(a.NodeID), a.Name, a.Description, a.GitRepository, a.GitBranch,
 		a.BuildPack, a.Dockerfile, a.BaseDirectory, a.Port, a.HealthCheck,
 		a.Status, a.FQDN, a.ImageTag, NullString(a.GitHubAppID),
 		a.GitHubInstallationID, a.RepositoryFullName, a.AutoDeploy,
-		a.PortMappings, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
+		a.PortMappings, a.RedirectHTTPS, a.CPULimit, a.MemoryLimit, a.PreDeployCommand,
 		a.PostDeployCommand, Text(time.Now().UTC()), a.ID)
 	if err != nil {
 		return err
@@ -199,77 +199,112 @@ func (r *AppRepo) AssignApplicationNode(ctx context.Context, id, nodeID string) 
 
 // --- domains ---
 
-// CreateDomain attaches a hostname to an application.
-func (r *AppRepo) CreateDomain(ctx context.Context, d *Domain) error {
-	if _, err := r.db.ExecContext(ctx,
-		`INSERT INTO domains (id, application_id, host, tls_enabled, cert_status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		d.ID, d.ApplicationID, d.Host, d.TLSEnabled, d.CertStatus, Text(time.Now().UTC())); err != nil {
-		return fmt.Errorf("insert domain: %w", err)
-	}
-	return nil
-}
+const domainColumns = `id, application_id, host, tls_enabled, cert_status, path, port,
+                      redirect_https, search_indexing, dns_status, dns_checked_at, created_at`
 
-// DomainsByApplication lists an application's hostnames.
-func (r *AppRepo) DomainsByApplication(ctx context.Context, appID string) ([]*Domain, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, application_id, host, tls_enabled, cert_status, created_at
-		   FROM domains WHERE application_id = ? ORDER BY created_at ASC`, appID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []*Domain
-	for rows.Next() {
-		var d Domain
-		var createdAt string
-		if err := rows.Scan(&d.ID, &d.ApplicationID, &d.Host, &d.TLSEnabled, &d.CertStatus, &createdAt); err != nil {
-			return nil, err
-		}
-		d.CreatedAt = Parse(createdAt)
-		out = append(out, &d)
-	}
-	return out, rows.Err()
-}
-
-// ListDomains returns every domain.
-func (r *AppRepo) ListDomains(ctx context.Context) ([]*Domain, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, application_id, host, tls_enabled, cert_status, created_at FROM domains ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []*Domain
-	for rows.Next() {
-		var d Domain
-		var createdAt string
-		if err := rows.Scan(&d.ID, &d.ApplicationID, &d.Host, &d.TLSEnabled, &d.CertStatus, &createdAt); err != nil {
-			return nil, err
-		}
-		d.CreatedAt = Parse(createdAt)
-		out = append(out, &d)
-	}
-	return out, rows.Err()
-}
-
-// DomainByHost resolves a hostname for Traefik config verification.
-func (r *AppRepo) DomainByHost(ctx context.Context, host string) (*Domain, error) {
+func scanDomain(scanner interface{ Scan(...any) error }) (*Domain, error) {
 	var d Domain
-	var createdAt string
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, application_id, host, tls_enabled, cert_status, created_at FROM domains WHERE host = ?`, host).
-		Scan(&d.ID, &d.ApplicationID, &d.Host, &d.TLSEnabled, &d.CertStatus, &createdAt)
+	var dnsCheckedAt, createdAt sql.NullString
+	err := scanner.Scan(&d.ID, &d.ApplicationID, &d.Host, &d.TLSEnabled, &d.CertStatus,
+		&d.Path, &d.Port, &d.RedirectHTTPS, &d.SearchIndexing, &d.DNSStatus,
+		&dnsCheckedAt, &createdAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, ErrNotFound
 	case err != nil:
 		return nil, err
 	}
-	d.CreatedAt = Parse(createdAt)
+	d.DNSCheckedAt = optionalTime(dnsCheckedAt)
+	d.CreatedAt = Parse(nullString(createdAt))
 	return &d, nil
+}
+
+// CreateDomain attaches a hostname to an application.
+func (r *AppRepo) CreateDomain(ctx context.Context, d *Domain) error {
+	if _, err := r.db.ExecContext(ctx,
+		`INSERT INTO domains (id, application_id, host, tls_enabled, cert_status, path, port,
+		                      redirect_https, search_indexing, dns_status, dns_checked_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ApplicationID, d.Host, d.TLSEnabled, d.CertStatus, d.Path, d.Port,
+		d.RedirectHTTPS, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt),
+		Text(time.Now().UTC())); err != nil {
+		return fmt.Errorf("insert domain: %w", err)
+	}
+	return nil
+}
+
+// UpdateDomain writes the full mutable domain record.
+func (r *AppRepo) UpdateDomain(ctx context.Context, d *Domain) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE domains SET host = ?, tls_enabled = ?, cert_status = ?, path = ?, port = ?,
+		                    redirect_https = ?, search_indexing = ?, dns_status = ?, dns_checked_at = ?
+		  WHERE id = ?`,
+		d.Host, d.TLSEnabled, d.CertStatus, d.Path, d.Port,
+		d.RedirectHTTPS, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt), d.ID)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
+// DomainsByApplication lists an application's hostnames.
+func (r *AppRepo) DomainsByApplication(ctx context.Context, appID string) ([]*Domain, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+domainColumns+` FROM domains WHERE application_id = ? ORDER BY created_at ASC`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*Domain
+	for rows.Next() {
+		d, err := scanDomain(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DomainByID loads a hostname.
+func (r *AppRepo) DomainByID(ctx context.Context, id string) (*Domain, error) {
+	d, err := scanDomain(r.db.QueryRowContext(ctx,
+		`SELECT `+domainColumns+` FROM domains WHERE id = ?`, id))
+	if err != nil {
+		return nil, fmt.Errorf("domain %s: %w", id, err)
+	}
+	return d, nil
+}
+
+// ListDomains returns every domain.
+func (r *AppRepo) ListDomains(ctx context.Context) ([]*Domain, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+domainColumns+` FROM domains ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*Domain
+	for rows.Next() {
+		d, err := scanDomain(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DomainByHost resolves a hostname for Traefik config verification.
+func (r *AppRepo) DomainByHost(ctx context.Context, host string) (*Domain, error) {
+	d, err := scanDomain(r.db.QueryRowContext(ctx,
+		`SELECT `+domainColumns+` FROM domains WHERE host = ?`, host))
+	if err != nil {
+		return nil, fmt.Errorf("domain %s: %w", host, err)
+	}
+	return d, nil
 }
 
 // SetDomainCertStatus records the outcome of a certificate request.

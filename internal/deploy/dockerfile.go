@@ -381,7 +381,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		Name:          fmt.Sprintf("%s-%d", app.Name, time.Now().Unix()),
 		Image:         imageRef,
 		Env:           runtimeEnv,
-		Labels:        ProxyLabels(app, domains),
+		Labels:        ProxyLabels(app, domains, p.proxyEmail != ""),
 		Ports:         ports,
 		Exposed:       []int{app.Port},
 		Volumes:       toMounts(volumes),
@@ -754,10 +754,12 @@ func toMounts(volumes []*db.Volume) []docker.Mount {
 	return out
 }
 
-// ProxyLabels builds the container labels the proxy (and the panel itself)
-// reads: the traefik router wiring for every attached domain, plus the
-// meghify bookkeeping labels. Exported so the API can show them read-only.
-func ProxyLabels(app *db.Application, domains []*db.Domain) map[string]string {
+// ProxyLabels builds the container labels the reverse proxy reads: one
+// http/https router pair per domain, Coolify style — a per-domain service, gzip
+// compression, HTTP→HTTPS redirects for TLS domains, the optional path prefix,
+// and a robots header when search indexing is switched off. certResolver
+// selects whether TLS domains ask Let's Encrypt for a certificate.
+func ProxyLabels(app *db.Application, domains []*db.Domain, certResolver bool) map[string]string {
 	labels := map[string]string{
 		"meghify.application": app.ID,
 		"meghify.port":        fmt.Sprint(app.Port),
@@ -766,18 +768,75 @@ func ProxyLabels(app *db.Application, domains []*db.Domain) map[string]string {
 		return labels
 	}
 
-	rules := make([]string, 0, len(domains))
-	for _, d := range domains {
-		labels["meghify.domain."+d.Host] = d.Host
-		if !d.TLSEnabled {
-			labels["meghify.domain."+d.Host+".tls"] = "false"
-		}
-		rules = append(rules, "Host(`"+d.Host+"`)")
-	}
 	labels["traefik.enable"] = "true"
-	labels["traefik.http.routers."+sanitizeName(app.Name)+".rule"] = "PathPrefix(`/`) && (" + strings.Join(rules, " || ") + ")"
-	labels["traefik.http.services."+sanitizeName(app.Name)+".loadbalancer.server.port"] = fmt.Sprint(app.Port)
+	labels["traefik.http.middlewares.gzip.compress"] = "true"
+
+	slug := sanitizeName(app.Name)
+	for index, domain := range domains {
+		host := strings.ToLower(strings.TrimSpace(domain.Host))
+		if host == "" {
+			continue
+		}
+		hostOnly := strings.SplitN(host, ":", 2)[0]
+		labels["meghify.domain."+host] = host
+
+		rule := "Host(`" + hostOnly + "`) && PathPrefix(`" + domainPath(domain) + "`)"
+		port := domain.Port
+		if port <= 0 {
+			port = app.Port
+		}
+
+		middlewares := []string{"gzip"}
+		if !domain.SearchIndexing {
+			robots := fmt.Sprintf("%s-%d-robots", slug, index)
+			labels["traefik.http.middlewares."+robots+".headers.customresponseheaders.X-Robots-Tag"] = "none"
+			middlewares = append(middlewares, robots)
+		}
+
+		base := fmt.Sprintf("%s-%d", slug, index)
+		if domain.TLSEnabled {
+			labels["traefik.http.routers.https-"+base+".entryPoints"] = "https"
+			labels["traefik.http.routers.https-"+base+".rule"] = rule
+			labels["traefik.http.routers.https-"+base+".service"] = "https-" + base
+			labels["traefik.http.routers.https-"+base+".middlewares"] = strings.Join(middlewares, ",")
+			labels["traefik.http.routers.https-"+base+".tls"] = "true"
+			if certResolver {
+				labels["traefik.http.routers.https-"+base+".tls.certresolver"] = "letsencrypt"
+			}
+
+			labels["traefik.http.routers.http-"+base+".entryPoints"] = "http"
+			labels["traefik.http.routers.http-"+base+".rule"] = rule
+			labels["traefik.http.routers.http-"+base+".service"] = "http-" + base
+			if domain.RedirectHTTPS {
+				labels["traefik.http.middlewares.redirect-to-https.redirectscheme.scheme"] = "https"
+				labels["traefik.http.routers.http-"+base+".middlewares"] = "redirect-to-https"
+			} else {
+				labels["traefik.http.routers.http-"+base+".middlewares"] = strings.Join(middlewares, ",")
+			}
+			labels["traefik.http.services.https-"+base+".loadbalancer.server.port"] = fmt.Sprint(port)
+			labels["traefik.http.services.http-"+base+".loadbalancer.server.port"] = fmt.Sprint(port)
+			continue
+		}
+
+		labels["traefik.http.routers.http-"+base+".entryPoints"] = "http"
+		labels["traefik.http.routers.http-"+base+".rule"] = rule
+		labels["traefik.http.routers.http-"+base+".service"] = "http-" + base
+		labels["traefik.http.routers.http-"+base+".middlewares"] = strings.Join(middlewares, ",")
+		labels["traefik.http.services.http-"+base+".loadbalancer.server.port"] = fmt.Sprint(port)
+	}
 	return labels
+}
+
+// domainPath normalises the router's path prefix.
+func domainPath(domain *db.Domain) string {
+	path := strings.TrimSpace(domain.Path)
+	if path == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
 }
 
 func healthCheckFor(app *db.Application) *container.HealthConfig {

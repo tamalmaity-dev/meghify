@@ -76,6 +76,8 @@ export interface Application {
   imageTag: string;
   /** "hostPort:containerPort" pairs, comma separated. */
   portMappings: string;
+  /** Default for TLS domains: plain HTTP redirects to https. */
+  redirectHttps: boolean;
   /** Fraction of one core; zero keeps the engine default. */
   cpuLimit: number;
   /** Bytes; zero keeps the engine default. */
@@ -196,6 +198,15 @@ export interface Domain {
   host: string;
   tlsEnabled: boolean;
   certStatus: string;
+  /** Router path prefix, e.g. /api/v3. */
+  path: string;
+  /** Internal port override; zero uses the application's port. */
+  port: number;
+  redirectHttps: boolean;
+  searchIndexing: boolean;
+  /** "matches", "mismatch" or "" when never checked. */
+  dnsStatus: string;
+  dnsCheckedAt?: string;
   createdAt: string;
 }
 

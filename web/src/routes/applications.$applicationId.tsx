@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronDown, Download, Github, Play, RefreshCw, RotateCcw, Search, Square, Terminal, Trash2 } from "lucide-react";
+import { ChevronDown, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Search, Settings, Square, Terminal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -8,7 +8,8 @@ import { PageHeader } from "@/components/app-shell";
 import { XTerminal } from "@/components/terminal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { StatusBadge } from "@/components/ui/badge";
 import { Table, TableToolbar, Td, Th, Tr } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -265,8 +266,8 @@ export function ApplicationDetailPage() {
             <DangerCard app={application} applicationId={applicationId} />
           )}
 
-          {section === "domains" && (
-            <DomainsCard applicationId={applicationId} domains={domains.data ?? []} />
+          {section === "domains" && application && (
+            <DomainsCard applicationId={applicationId} app={application} domains={domains.data ?? []} />
           )}
 
           {section === "environment" && (
@@ -633,90 +634,367 @@ function LatestDeploymentCard({ latest }: { latest?: Deployment }) {
   );
 }
 
-function DomainsCard({ applicationId, domains }: { applicationId: string; domains: Domain[] }) {
+/** Coolify-style Domains card: per-domain protocol, port, path, DNS checks. */
+function DomainsCard({
+  applicationId,
+  app,
+  domains,
+}: {
+  applicationId: string;
+  app: Application;
+  domains: Domain[];
+}) {
   const queryClient = useQueryClient();
-  const [host, setHost] = useState("");
+  const [query, setQuery] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Domain | null>(null);
+  const [form, setForm] = useState({ protocol: "https", host: "", port: "", path: "" });
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["domains", applicationId] });
     await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
   };
 
-  const add = useMutation({
-    mutationFn: () => api.post(`/applications/${applicationId}/domains`, { host: host.trim() }),
+  const openAdd = () => {
+    setEditing(null);
+    setForm({ protocol: "https", host: "", port: String(app.port), path: "" });
+    setDialogOpen(true);
+  };
+  const openEdit = (domain: Domain) => {
+    setEditing(domain);
+    setForm({
+      protocol: domain.tlsEnabled ? "https" : "http",
+      host: domain.host,
+      port: domain.port ? String(domain.port) : String(app.port),
+      path: domain.path ?? "",
+    });
+    setDialogOpen(true);
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        host: form.host.trim(),
+        tlsEnabled: form.protocol === "https",
+        port: Number(form.port) || 0,
+        path: form.path.trim(),
+      };
+      return editing
+        ? api.patch(`/applications/domains/${editing.id}`, body)
+        : api.post(`/applications/${applicationId}/domains`, body);
+    },
     onSuccess: async () => {
-      setHost("");
-      toast.success("Domain added — re-deploy to attach it to the proxy");
+      setDialogOpen(false);
+      toast.success(
+        editing ? "Domain updated — redeploy to apply" : "Domain added — redeploy to attach it",
+      );
       await invalidate();
     },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const generate = useMutation({
+    mutationFn: () => api.get<{ host: string }>(`/applications/${applicationId}/suggest-domain`),
+    onSuccess: (suggestion) => setForm((current) => ({ ...current, host: suggestion.host })),
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const toggleRedirect = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api.put<Application>(`/applications/${applicationId}`, applicationPayload(app, { redirectHttps: enabled })),
+    onSuccess: async () => {
+      toast.success("Redirect setting saved — redeploy to apply");
+      await invalidate();
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const toggleIndexing = useMutation({
+    mutationFn: (domain: Domain) =>
+      api.patch(`/applications/domains/${domain.id}`, {
+        host: domain.host,
+        tlsEnabled: domain.tlsEnabled,
+        port: domain.port,
+        path: domain.path,
+        searchIndexing: !domain.searchIndexing,
+      }),
+    onSuccess: invalidate,
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const checkOne = useMutation({
+    mutationFn: (domainId: string) => api.post(`/applications/domains/${domainId}/check`),
+    onSuccess: invalidate,
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const checkAll = useMutation({
+    mutationFn: () => api.post(`/applications/${applicationId}/domains/check`),
+    onSuccess: async () => {
+      toast.success("DNS checked");
+      await invalidate();
+    },
+    onError: (error) => toast.error(errorText(error)),
   });
 
   const remove = useMutation({
     mutationFn: (domainId: string) => api.delete(`/applications/domains/${domainId}`),
     onSuccess: async () => {
-      toast.success("Domain removed");
+      toast.success("Domain removed — redeploy to detach it");
       await invalidate();
     },
+    onError: (error) => toast.error(errorText(error)),
   });
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Domains</CardTitle>
-        <span className="text-[11px] text-black/40 dark:text-white/35">
-          Point an A record at this server, then re-deploy
-        </span>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={host}
-            onChange={(event) => setHost(event.target.value)}
-            placeholder="app.example.com"
-            className="max-w-xs flex-1"
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={host.trim() === "" || add.isPending}
-            onClick={() => add.mutate()}
-          >
-            Add domain
-          </Button>
-        </div>
-        {add.isError && <p className="text-[11px] text-danger">{errorText(add.error)}</p>}
+  const needle = query.trim().toLowerCase();
+  const list = needle ? domains.filter((d) => d.host.toLowerCase().includes(needle)) : domains;
 
-        {domains.length === 0 ? (
-          <p className="rounded-md bg-recessed px-3 py-4 text-center text-[12px] text-black/45 dark:text-white/40">
-            No domains yet. Add one above to publish this application.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {domains.map((domain) => (
-              <div
-                key={domain.id}
-                className="flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-mono text-[12px]">{domain.host}</div>
-                  <div className="text-[10.5px] text-black/40 dark:text-white/30">
-                    {domain.tlsEnabled ? `TLS · ${domain.certStatus || "pending"}` : "TLS disabled"}
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={remove.isPending}
-                  onClick={() => remove.mutate(domain.id)}
-                >
-                  Remove
-                </Button>
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Domains</CardTitle>
+          <span className="text-[11px] text-black/40 dark:text-white/35">
+            {domains.length === 1 ? "1 domain" : `${domains.length} domains`}
+          </span>
+        </CardHeader>
+        <CardContent className="p-0">
+          <TableToolbar
+            left={
+              <div className="relative max-w-sm">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search domains"
+                  className="pl-8"
+                />
               </div>
-            ))}
+            }
+            right={
+              <>
+                <Button
+                  variant="neutral"
+                  size="sm"
+                  onClick={() => checkAll.mutate()}
+                  disabled={checkAll.isPending || domains.length === 0}
+                >
+                  <RefreshCw className={checkAll.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                  Check All DNS
+                </Button>
+                <Button variant="primary" size="sm" onClick={openAdd}>
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Domain
+                </Button>
+              </>
+            }
+          />
+          <div className="flex items-center justify-end gap-2 border-b border-line/40 px-3 py-2">
+            <span className="text-[11px] text-black/50 dark:text-white/45">
+              Redirect HTTP to HTTPS
+            </span>
+            <Select
+              value={app.redirectHttps ? "enabled" : "disabled"}
+              onChange={(event) => toggleRedirect.mutate(event.target.value === "enabled")}
+              className="w-36"
+            >
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </Select>
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          {domains.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+              No domains yet — add one, or redeploy to get an automatic sslip.io address.
+            </p>
+          ) : list.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+              No domain matches that search.
+            </p>
+          ) : (
+            <Table
+              head={
+                <>
+                  <Th>Domain</Th>
+                  <Th>Protocol redirect</Th>
+                  <Th>Domain redirect</Th>
+                  <Th>Internal port</Th>
+                  <Th>Search indexing</Th>
+                  <Th>DNS status</Th>
+                  <Th align="right">Actions</Th>
+                </>
+              }
+            >
+              {list.map((domain) => (
+                <Tr key={domain.id}>
+                  <Td>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Globe className="h-3.5 w-3.5 shrink-0 text-black/35 dark:text-white/30" />
+                      <a
+                        href={`${domain.tlsEnabled ? "https" : "http"}://${domain.host}${domain.path ?? ""}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="truncate font-mono text-[12px] text-brand hover:underline"
+                      >
+                        {domain.tlsEnabled ? "https" : "http"}://{domain.host}
+                        {domain.path ?? ""}
+                      </a>
+                    </span>
+                  </Td>
+                  <Td>
+                    {domain.tlsEnabled ? (
+                      domain.redirectHttps ? (
+                        <span className="text-[11.5px] text-ok">HTTP → HTTPS</span>
+                      ) : (
+                        <span className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</span>
+                      )
+                    ) : (
+                      <span className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</span>
+                    )}
+                  </Td>
+                  <Td className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</Td>
+                  <Td className="font-mono text-[12px]">{domain.port || app.port}</Td>
+                  <Td>
+                    <input
+                      type="checkbox"
+                      checked={domain.searchIndexing}
+                      onChange={() => toggleIndexing.mutate(domain)}
+                      title="Allow crawlers to index this domain"
+                    />
+                  </Td>
+                  <Td>
+                    {domain.dnsStatus === "matches" ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                        <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+                        DNS matches
+                      </span>
+                    ) : domain.dnsStatus === "mismatch" ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2 py-0.5 text-[10.5px] font-medium text-danger">
+                        <span className="h-1.5 w-1.5 rounded-full bg-danger" />
+                        DNS mismatch
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] font-medium text-black/50 dark:bg-white/[0.08] dark:text-white/45">
+                        <span className="h-1.5 w-1.5 rounded-full bg-black/25 dark:bg-white/25" />
+                        Not checked
+                      </span>
+                    )}
+                  </Td>
+                  <Td align="right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Check DNS"
+                        onClick={() => checkOne.mutate(domain.id)}
+                        disabled={checkOne.isPending}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" title="Edit domain" onClick={() => openEdit(domain)}>
+                        <Settings className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Remove domain"
+                        disabled={remove.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Remove ${domain.host}? Redeploy to detach it from the proxy.`)) {
+                            remove.mutate(domain.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Modal
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        title={editing ? "Edit domain" : "Add domain"}
+        description="Traffic for this address routes to the application after the next deploy."
+        footer={
+          <>
+            {!editing && (
+              <Button
+                variant="neutral"
+                onClick={() => generate.mutate()}
+                disabled={generate.isPending}
+                className="mr-auto"
+              >
+                Generate Domain
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={form.host.trim() === "" || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-[110px_minmax(0,1fr)_96px] gap-3">
+            <div>
+              <Label htmlFor="domain-protocol">Protocol</Label>
+              <Select
+                id="domain-protocol"
+                value={form.protocol}
+                onChange={(event) => setForm({ ...form, protocol: event.target.value })}
+              >
+                <option value="https">https</option>
+                <option value="http">http</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="domain-host">Domain</Label>
+              <Input
+                id="domain-host"
+                value={form.host}
+                onChange={(event) => setForm({ ...form, host: event.target.value })}
+                placeholder="app.example.com"
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label htmlFor="domain-port">Port</Label>
+              <Input
+                id="domain-port"
+                value={form.port}
+                onChange={(event) => setForm({ ...form, port: event.target.value })}
+                placeholder={String(app.port)}
+              />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="domain-path">Path</Label>
+            <Input
+              id="domain-path"
+              value={form.path}
+              onChange={(event) => setForm({ ...form, path: event.target.value })}
+              placeholder="/api/v3"
+            />
+            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              Optional path prefix routed to this application; leave empty for every path.
+            </p>
+          </div>
+          {save.isError && <p className="text-[11px] text-danger">{errorText(save.error)}</p>}
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -1388,6 +1666,7 @@ function applicationPayload(app: Application, overrides: Record<string, unknown>
     nodeId: app.nodeId,
     autoDeploy: app.autoDeploy,
     portMappings: app.portMappings,
+    redirectHttps: app.redirectHttps,
     cpuLimit: app.cpuLimit,
     memoryLimit: app.memoryLimit,
     preDeployCommand: app.preDeployCommand,
