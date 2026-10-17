@@ -214,6 +214,7 @@ Full details live in the docs folder:
 | [docs/install.md](docs/install.md) | every preflight check, install modes, all flags, the `meghify` helper, update + rollback, uninstall, troubleshooting |
 | [docs/ci-release.md](docs/ci-release.md) | the CI gates, the release workflow, how versions get stamped into binaries |
 | [docs/github-apps.md](docs/github-apps.md) | connecting GitHub: creating the app from the panel, installations, repository pickers, push-to-deploy webhooks |
+| [docs/deployments.md](docs/deployments.md) | the build pipeline, the helper-container builder, build packs, deployment history and logs |
 | [docs/update-versions/](docs/update-versions/) | release-by-release update logs — what changed and how to upgrade |
 
 ---
