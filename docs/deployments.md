@@ -28,12 +28,44 @@ A deployment is one durable job:
 Progress streams to the deployment log (durable, replayable) and to open
 browsers over SSE.
 
+## The build sandbox
+
+A build executes arbitrary repository code (`npm ci`, compilers, arbitrary
+`RUN` steps), and that code is what can take a small server down. Meghify
+therefore runs Dockerfile, nixpacks and railpack builds inside an **isolated
+Docker-in-Docker daemon** — the build sandbox — and not against the engine
+that runs the panel and the applications:
+
+```
+panel ──> helper container ──> build sandbox (meghify-buildd, limited CPU/RAM)
+                                     │  builds the image
+                                     ▼
+                              save + load ──> host engine ──> release
+```
+
+- The sandbox is a `docker:29-dind` container (override with
+  `BUILD_SANDBOX_IMAGE`) holding a private image cache in the
+  `meghify-build-cache` volume, on its own `meghify-build` network.
+- It is **resource-limited**: `BUILD_CPU_LIMIT` and `BUILD_MEMORY_LIMIT`, and
+  when unset, **half of the node** (at least one core and 1 GiB, at most four
+  cores and 8 GiB) is reserved for builds. No matter what a build does, the
+  panel, the proxy and the running applications keep their share. The limits
+  are logged at sandbox creation; recreating the container (`docker rm -f
+  meghify-buildd`) re-reads them after a configuration change.
+- The built image is transferred to the host engine with a compressed
+  `docker save`/`docker load` before the release step.
+- Docker Compose stacks are the exception: `docker compose up` must create
+  the application containers on the host engine, so compose deployments keep
+  the mounted engine socket.
+- `BUILD_SANDBOX` selects the behavior: `auto` (default) falls back to the
+  legacy socket-mounted helper when nested Docker is not permitted, `on`
+  makes a sandbox failure an error, `off` disables the sandbox entirely.
+
 ## The build helper container
 
 The panel itself is deliberately minimal: its image is distroless and carries
 neither git nor nixpacks. Every git, buildpack and compose command runs inside
-a disposable helper container that mounts the engine socket — the same model
-Coolify uses. Two consequences:
+a disposable helper container — the same model Coolify uses. Two consequences:
 
 - the host running the panel needs only Docker; and
 - build tools never bloat the panel's own image or host.
@@ -43,7 +75,8 @@ published by every release (Alpine plus git, nixpacks, railpack, and the
 docker CLI with buildx and compose). `BUILD_HELPER_IMAGE` overrides it if you
 want to pin your own image; it needs `git`, `nixpacks`, `railpack` and the
 `docker` CLI on `PATH`. Helper containers are named `meghify-builder-…` and
-are removed when the deployment ends. If the image cannot be pulled, the panel
+are removed when the deployment ends, when it is killed, when it times out,
+and when the panel restarts. If the image cannot be pulled, the panel
 falls back to running the tools on its own host, which keeps older installs
 with those tools working.
 
@@ -51,9 +84,25 @@ with those tools working.
 
 Builds are CPU-heavy, so at most `BUILD_CONCURRENCY` deployments (default
 **1**) build at the same time — a deployment that has to wait says so in its
-log. Each helper container can also be capped with `BUILD_CPU_LIMIT` (whole
-cores, e.g. `1.5`) and `BUILD_MEMORY_LIMIT` (bytes or `512m` / `2g`); both
-default to the engine's own limits.
+log. The sandbox caps every build's CPU and memory (see above); the helper
+container inherits the same caps.
+
+### Stuck builds cannot hang the panel
+
+A deployment is bounded by `DEPLOY_TIMEOUT` (default **30m**, covering build,
+image transfer, release and health checks). Coolify uses the same idea (a
+one-hour queue job timeout, configurable per server). When the deadline hits,
+the helper container is removed — which kills the build process with it — and
+the deployment fails with a message in its log. A running build can also be
+killed from the UI: open the deployment's build output and press
+**Kill build** (the endpoint is `DELETE /api/deployments/{id}`).
+
+If the panel itself is killed mid-deployment (OOM, reboot, `systemctl
+restart`), startup recovery marks the in-flight deployment **canceled**
+("interrupted by a panel restart"), restores the application's status from its
+container, removes orphaned helpers and deletes half-created rolling-release
+containers — so the next deploy is never blocked by a stuck row. Dokploy does
+the same at boot (`initCancelDeployments`).
 
 ## Build packs
 
@@ -67,6 +116,12 @@ default to the engine's own limits.
 
 The **Base directory** setting scopes the build to a subdirectory for every
 pack.
+
+Nixpacks gets every `build`-scope environment variable as `--env`, and
+defaults `NIXPACKS_NODE_VERSION` to **22** (`BUILD_DEFAULT_NODE_VERSION`)
+unless the application sets it. Without that default nixpacks falls back to
+the end-of-life Node 18 whenever `package.json` has no `engines` field, which
+breaks current Next.js dependencies.
 
 ## Automatic domains
 
