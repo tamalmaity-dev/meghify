@@ -76,9 +76,13 @@ installation list from GitHub.
 In a project, press **New resource** and pick **Git Repository (with GitHub
 App)**:
 
-1. **Choose GitHub App** — pick the account (user or organization).
-2. **Choose a repository** — search the list GitHub returned, including private
-   ones.
+1. **Choose GitHub App** — every source is listed with the accounts it is
+   installed on. Nothing suitable yet? **New GitHub App** opens the same dialog
+   as the Sources page without leaving the flow, **Finish setup** resumes an
+   incomplete source, and a source with no installation yet offers **Install on
+   GitHub** (grant access over there, then press **Refresh**).
+2. **Choose a repository** — pick the account the app is installed on, then
+   search the list GitHub returned, including private ones.
 3. The application form opens prefilled: repository URL, default branch,
    Nixpacks as the build pack, and **Deploy automatically on every push**
    checked. Adjust what you like and press **Create**.
