@@ -5,6 +5,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -423,6 +424,88 @@ func (c *Client) ContainerLogs(ctx context.Context, id string, tail string, foll
 		return nil, fmt.Errorf("container logs: %w", err)
 	}
 	return reader, nil
+}
+
+// ContainerEndpoint is one container's name and IP on a network, the raw
+// material for build-time --add-host entries.
+type ContainerEndpoint struct {
+	Name string
+	IP   string
+}
+
+// NetworkContainers lists running containers attached to a network with their
+// IPs on that network. Builds run against the default bridge of the target
+// engine (or the build sandbox), where user-defined-network DNS for
+// application containers is invisible; Coolify passes the same name/IP
+// mapping to every build so a build can reach a database service by name.
+func (c *Client) NetworkContainers(ctx context.Context, networkName string) ([]ContainerEndpoint, error) {
+	list, err := c.cli.ContainerList(ctx, container.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("network", networkName)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list containers on %s: %w", networkName, err)
+	}
+	out := make([]ContainerEndpoint, 0, len(list))
+	for _, item := range list {
+		entry, ok := item.NetworkSettings.Networks[networkName]
+		if !ok || entry.IPAddress == "" {
+			continue
+		}
+		name := ""
+		for _, n := range item.Names {
+			if trimmed := strings.TrimPrefix(n, "/"); trimmed != "" {
+				name = trimmed
+				break
+			}
+		}
+		if name == "" {
+			continue
+		}
+		out = append(out, ContainerEndpoint{Name: name, IP: entry.IPAddress})
+	}
+	return out, nil
+}
+
+// TailContainerLogs returns the demultiplexed tail of a container's output,
+// bounded to limit bytes. Release failures print it into the deployment log,
+// so a container that dies at startup explains itself instead of leaving the
+// domain answering the proxy's bare 404.
+func (c *Client) TailContainerLogs(ctx context.Context, id, tail string, limit int64) (string, error) {
+	reader, err := c.ContainerLogs(ctx, id, tail, false)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	capped := &cappedWriter{left: limit}
+	// best effort: a partial log is still more useful than no log
+	_, _ = stdcopy.StdCopy(capped, capped, reader)
+	out := strings.TrimRight(capped.buf.String(), "\n")
+	if capped.dropped {
+		return out + "\n... (log truncated)", nil
+	}
+	return out, nil
+}
+
+// cappedWriter keeps at most left bytes and remembers whether the rest was.
+type cappedWriter struct {
+	buf     bytes.Buffer
+	left    int64
+	dropped bool
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if w.left <= 0 {
+		w.dropped = true
+		return len(p), nil
+	}
+	keep := len(p)
+	if int64(keep) > w.left {
+		keep = int(w.left)
+		w.dropped = true
+	}
+	w.buf.Write(p[:keep])
+	w.left -= int64(keep)
+	return len(p), nil
 }
 
 // ExecOptions describes an interactive exec session.

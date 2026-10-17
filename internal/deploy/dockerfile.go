@@ -57,6 +57,48 @@ func (p *Pipeline) runDockerfile(ctx context.Context, sink io.Writer, app *db.Ap
 	return p.release(ctx, sink, app, imageRef)
 }
 
+// addHostFlags renders the --add-host arguments a build needs to reach the
+// application's other containers by name (a database service the app talks to,
+// for example). Docker builds run against the default bridge of the target
+// engine, where user-defined-network DNS is invisible, and the sandboxed
+// daemon does not know the host engine's networks at all — Coolify passes the
+// same assembled mapping to every build.
+func (p *Pipeline) addHostFlags(ctx context.Context, app *db.Application) []string {
+	if p.client == nil {
+		return nil
+	}
+	endpoints, err := p.client.NetworkContainers(ctx, networkName(app))
+	if err != nil || len(endpoints) == 0 {
+		return nil
+	}
+	flags := make([]string, 0, len(endpoints))
+	seen := make(map[string]bool, len(endpoints))
+	for _, endpoint := range endpoints {
+		key := endpoint.Name + ":" + endpoint.IP
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		flags = append(flags, "--add-host "+shellQuote(key))
+	}
+	return flags
+}
+
+// sortedLabelFlags renders image labels as quoted key=value flags in a stable
+// order, so the build script is deterministic.
+func sortedLabelFlags(labels map[string]string) []string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, shellQuote(key+"="+labels[key]))
+	}
+	return out
+}
+
 // buildDockerfileInHelper clones the repository and runs docker build inside
 // the helper container (against the build sandbox when available).
 func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, app *db.Application, imageRef string, payload Payload) error {
@@ -98,11 +140,19 @@ func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, 
 		script.WriteString("export " + name + "=" + shellQuote(*value) + "\n")
 	}
 	script.WriteString("docker build --progress=plain -f " + shellQuote(dockerfile) + " -t " + shellQuote(imageRef))
+	for _, flag := range p.addHostFlags(ctx, app) {
+		script.WriteString(" " + flag)
+	}
+	labels := map[string]string{
+		"meghify.application": app.ID,
+		"meghify.environment": app.EnvironmentID,
+	}
+	for _, label := range sortedLabelFlags(labels) {
+		script.WriteString(" --label " + label)
+	}
 	if payload.NoCache {
 		script.WriteString(" --no-cache --pull")
 	}
-	script.WriteString(" --label " + shellQuote("meghify.application="+app.ID))
-	script.WriteString(" --label " + shellQuote("meghify.environment="+app.EnvironmentID))
 	for name := range buildArgs {
 		if !validEnvName(name) {
 			continue
@@ -201,23 +251,84 @@ func (p *Pipeline) buildAutoInHelper(ctx context.Context, sink io.Writer, app *d
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	binary := "nixpacks"
-	if app.BuildPack == db.BuildRailpack {
-		binary = "railpack"
+	ctxDir := builderContextDir(app)
+	if app.BuildPack == db.BuildNixpacks {
+		return p.buildNixpacks(ctx, sink, app, build, imageRef, payload, ctxDir)
 	}
+
+	binary := "railpack"
 	sink.Write([]byte("[2/4] building with " + binary + "\n"))
-	args := []string{"build", builderContextDir(app), "--name", imageRef}
-	if binary == "nixpacks" {
-		env, defaulted := p.nixpacksEnv(ctx, app)
-		if defaulted != "" {
-			sink.Write([]byte("[*] nixpacks node version " + defaulted + " (set NIXPACKS_NODE_VERSION to override)\n"))
-		}
-		for _, kv := range env {
-			args = append(args, "--env", kv)
-		}
-	}
+	args := []string{"build", ctxDir, "--name", imageRef}
 	if err := build.run(ctx, append([]string{binary}, args...)...); err != nil {
 		return fmt.Errorf("%s build: %w", binary, err)
+	}
+	if build.sandboxed {
+		return build.transferImage(ctx, imageRef)
+	}
+	return nil
+}
+
+// buildNixpacks reproduces Coolify's nixpacks invocation: `nixpacks build
+// PATH --out` generates the Dockerfile and the build script without building,
+// and the image is then built with a docker invocation Meghify controls. That
+// is what makes build-time --add-host entries (the application network's
+// containers, so a database a build renders against resolves by name) and
+// image labels possible; a plain `nixpacks build` hides its docker build
+// inside the binary.
+func (p *Pipeline) buildNixpacks(ctx context.Context, sink io.Writer, app *db.Application, build *builder, imageRef string, payload Payload, ctxDir string) error {
+	sink.Write([]byte("[2/4] building with nixpacks\n"))
+	env, defaulted := p.nixpacksEnv(ctx, app)
+	if defaulted != "" {
+		sink.Write([]byte("[*] nixpacks node version " + defaulted + " (set NIXPACKS_NODE_VERSION to override)\n"))
+	}
+
+	// `--out` saves the generated Dockerfile instead of building it with
+	// Docker; `--cache-key` keys the BuildKit cache mounts across deployments.
+	args := []string{"build", ctxDir, "--out", ctxDir, "--cache-key", app.ID}
+	for _, kv := range env {
+		args = append(args, "--env", kv)
+	}
+	if err := build.run(ctx, append([]string{"nixpacks"}, args...)...); err != nil {
+		return fmt.Errorf("nixpacks plan: %w", err)
+	}
+
+	// The generated Dockerfile re-declares every build env as ARG + ENV, so the
+	// values are exported into the script and referenced by name with
+	// --build-arg; nixpacks' own build script does the same.
+	script := &strings.Builder{}
+	script.WriteString("set -e\n")
+	script.WriteString("cd " + shellQuote(ctxDir) + "\n")
+	names := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, value, _ := strings.Cut(kv, "=")
+		if !validEnvName(name) {
+			continue
+		}
+		names = append(names, name)
+		script.WriteString("export " + name + "=" + shellQuote(value) + "\n")
+	}
+	script.WriteString("DOCKER_BUILDKIT=1 docker build --progress=plain -f .nixpacks/Dockerfile -t " + shellQuote(imageRef))
+	for _, flag := range p.addHostFlags(ctx, app) {
+		script.WriteString(" " + flag)
+	}
+	for _, label := range sortedLabelFlags(map[string]string{
+		"meghify.application": app.ID,
+		"meghify.environment": app.EnvironmentID,
+	}) {
+		script.WriteString(" --label " + label)
+	}
+	for _, name := range names {
+		script.WriteString(" --build-arg " + name)
+	}
+	if payload.NoCache {
+		script.WriteString(" --pull --no-cache")
+	}
+	script.WriteString(" .\n")
+	if err := build.writeFile(ctx, "/workspace/build.sh", script.String()); err != nil {
+		return err
+	}
+	if err := build.run(ctx, "sh", "/workspace/build.sh"); err != nil {
+		return fmt.Errorf("nixpacks build: %w", err)
 	}
 	if build.sandboxed {
 		return build.transferImage(ctx, imageRef)
@@ -464,14 +575,24 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		return fmt.Errorf("start container: %w", err)
 	}
 
+	revert := func(err error) error {
+		sink.Write([]byte("[!] container did not survive the release, keeping the previous deployment\n"))
+		p.dumpContainerLogs(ctx, sink, containerID)
+		p.client.StopContainer(ctx, containerID, 10*time.Second)
+		p.client.RemoveContainer(ctx, containerID)
+		return err
+	}
+
 	if app.HealthCheck != "" {
 		if err := p.waitHealthy(ctx, containerID, 90*time.Second, sink); err != nil {
-			sink.Write([]byte("[!] health check failed, reverting to previous container\n"))
-			p.client.StopContainer(ctx, containerID, 10*time.Second)
-			p.client.RemoveContainer(ctx, containerID)
-			return err
+			sink.Write([]byte("[!] health check failed\n"))
+			return revert(err)
 		}
 		sink.Write([]byte("[ok] container is healthy\n"))
+	} else if err := p.confirmStartup(ctx, sink, containerID); err != nil {
+		return revert(err)
+	} else {
+		sink.Write([]byte("[ok] container survived the release window\n"))
 	}
 
 	if previous != nil && previous.ID != containerID {
@@ -558,6 +679,56 @@ func parseMappings(raw string) (map[int]int, error) {
 		mappings[container] = host
 	}
 	return mappings, nil
+}
+
+// confirmStartup gives a container without a health check a short window
+// against the most common release failure: the image starts and dies
+// immediately (a missing environment variable, an OOM kill, a broken start
+// command, a crash loop from restart policy). Deploying a dead container
+// would report success while the domain answers the proxy's bare "404 page
+// not found" — Coolify and Dokploy both fail the deployment instead.
+func (p *Pipeline) confirmStartup(ctx context.Context, sink io.Writer, containerID string) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		info, err := p.client.InspectContainer(ctx, containerID)
+		if err != nil {
+			return err
+		}
+		if info.State != nil {
+			status := info.State.Status
+			restarting := info.RestartCount > 0 || status == "restarting"
+			if status == "exited" || status == "dead" || restarting {
+				reason := status
+				if restarting {
+					reason = fmt.Sprintf("restart loop (%d restarts in the startup window)", info.RestartCount)
+				}
+				if info.State.OOMKilled {
+					reason += "; killed because its memory limit was reached"
+				}
+				return fmt.Errorf("container failed to start (%s)", reason)
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// dumpContainerLogs copies the container's recent output into the deployment
+// log, so a failed release shows why the process died without a second trip
+// to the server shell.
+func (p *Pipeline) dumpContainerLogs(ctx context.Context, sink io.Writer, containerID string) {
+	logs, err := p.client.TailContainerLogs(ctx, containerID, "80", 12*1024)
+	if err != nil || strings.TrimSpace(logs) == "" {
+		sink.Write([]byte("[!] the container left no output\n"))
+		return
+	}
+	sink.Write([]byte("[container output]\n" + logs + "\n\n"))
 }
 
 // waitHealthy polls a container until its healthcheck reports healthy.
