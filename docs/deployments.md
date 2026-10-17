@@ -31,13 +31,22 @@ Coolify uses. Two consequences:
 - the host running the panel needs only Docker; and
 - build tools never bloat the panel's own image or host.
 
-The image is configured with `BUILD_HELPER_IMAGE` (default
-`coollabsio/coolify-helper:1.0.17`). Point it at your own image if you prefer;
-it needs `git`, `nixpacks`, `railpack` and the `docker` CLI on `PATH`.
-Helper containers are named `meghify-builder-…` and are removed when the
-deployment ends. If the image cannot be pulled, the panel falls back to
-running the tools on its own host, which keeps older installs with those
-tools working.
+The image is Meghify's own — `ghcr.io/tamalmaity-dev/meghify-helper:<version>`,
+published by every release (Alpine plus git, nixpacks, railpack, and the
+docker CLI with buildx and compose). `BUILD_HELPER_IMAGE` overrides it if you
+want to pin your own image; it needs `git`, `nixpacks`, `railpack` and the
+`docker` CLI on `PATH`. Helper containers are named `meghify-builder-…` and
+are removed when the deployment ends. If the image cannot be pulled, the panel
+falls back to running the tools on its own host, which keeps older installs
+with those tools working.
+
+### Keeping builds light
+
+Builds are CPU-heavy, so at most `BUILD_CONCURRENCY` deployments (default
+**1**) build at the same time — a deployment that has to wait says so in its
+log. Each helper container can also be capped with `BUILD_CPU_LIMIT` (whole
+cores, e.g. `1.5`) and `BUILD_MEMORY_LIMIT` (bytes or `512m` / `2g`); both
+default to the engine's own limits.
 
 ## Build packs
 
@@ -51,6 +60,14 @@ tools working.
 
 The **Base directory** setting scopes the build to a subdirectory for every
 pack.
+
+## Automatic domains
+
+An application created without a domain gets one:
+`<name>-<id>.<server-ip>.sslip.io`, served over plain HTTP. sslip.io resolves
+any subdomain that carries an IP back to that IP, so the app is reachable
+immediately with no DNS work — replace it with a real domain any time from
+the application's **Domains** section.
 
 ## Credentials
 
