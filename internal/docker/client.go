@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -793,19 +792,6 @@ func (c *Client) EnsureVolume(ctx context.Context, name string) error {
 		return fmt.Errorf("create volume %s: %w", name, err)
 	}
 	return nil
-}
-
-// DiskUsage reports total bytes used by images, containers and volumes.
-func (c *Client) DiskUsage(ctx context.Context) (int64, error) {
-	usage, err := c.cli.DiskUsage(ctx, types.DiskUsageOptions{})
-	if err != nil {
-		return 0, fmt.Errorf("disk usage: %w", err)
-	}
-
-	// LayersSize is the engine's own accounting of image bytes on disk, which is
-	// what matters for capacity planning. Containers and volumes are bounded by
-	// the images they come from, so they are not double counted here.
-	return usage.LayersSize + usage.BuilderSize, nil
 }
 
 // Close releases the underlying HTTP connections.

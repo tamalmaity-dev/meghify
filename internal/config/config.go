@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	units "github.com/docker/go-units"
 )
 
 // Dialect is the active database driver.
@@ -85,6 +87,18 @@ type Config struct {
 	// still nixpacks' fallback when no engines field exists.
 	BuildDefaultNodeVersion string `env:"BUILD_DEFAULT_NODE_VERSION" envDefault:"22"`
 
+	// IMAGE_KEEP is how built images per application a cleanup keeps: the
+	// newest ones first. The image a running container serves from always
+	// survives regardless of the count.
+	ImageKeep int `env:"IMAGE_KEEP" envDefault:"2"`
+
+	// BUILD_CACHE_KEEP bounds the Docker build cache (of the build sandbox
+	// and the engine), accepting suffix sizes like 512m or 8g. When the cache
+	// is larger the next cleanup pass prunes it back, keeping the most
+	// recently used entries; the bound only moves the newest builds' hot
+	// caches out later. Set to 0 to leave the cache unbounded.
+	BuildCacheKeep string `env:"BUILD_CACHE_KEEP" envDefault:"8g"`
+
 	// DeployTimeout bounds a whole deployment (queue wait excluded): build,
 	// image transfer, release and health checks. A stuck build is stopped and
 	// the deployment fails instead of holding the queue forever.
@@ -118,6 +132,10 @@ type Config struct {
 	S3AccessKey string `env:"S3_ACCESS_KEY" envDefault:""`
 	S3SecretKey string `env:"S3_SECRET_KEY" envDefault:""`
 	S3Region    string `env:"S3_REGION" envDefault:"us-east-1"`
+
+	// buildCacheKeepBytes caches the parsed BUILD_CACHE_KEEP value; nil until
+	// the validator (the only constructor) has run.
+	buildCacheKeepBytes *int64
 }
 
 // Load reads configuration from the process environment.
@@ -183,7 +201,28 @@ func (c *Config) validate() error {
 	if c.DeployTimeout <= 0 {
 		return errors.New("DEPLOY_TIMEOUT must be positive")
 	}
+	if c.ImageKeep < 1 {
+		return errors.New("IMAGE_KEEP must be at least 1")
+	}
+	keep := int64(0)
+	if raw := strings.TrimSpace(c.BuildCacheKeep); raw != "" && raw != "0" {
+		value, err := units.RAMInBytes(raw)
+		if err != nil {
+			return fmt.Errorf("BUILD_CACHE_KEEP must be a size like 512m or 8g (got %q)", raw)
+		}
+		keep = value
+	}
+	c.buildCacheKeepBytes = &keep
 	return nil
+}
+
+// BuildCacheKeepBytes returns the parsed BUILD_CACHE_KEEP value in bytes; 0
+// leaves the build cache unbounded.
+func (c *Config) BuildCacheKeepBytes() int64 {
+	if c == nil || c.buildCacheKeepBytes == nil {
+		return 0
+	}
+	return *c.buildCacheKeepBytes
 }
 
 // IsProduction reports whether the panel runs in production mode.

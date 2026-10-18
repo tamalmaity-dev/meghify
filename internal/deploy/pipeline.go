@@ -75,6 +75,9 @@ type Options struct {
 	SandboxImage string
 	// DeployTimeout bounds one whole deployment; zero leaves it unbounded.
 	DeployTimeout time.Duration
+	// ImageKeep is how many built images per application survive a cleanup:
+	// the newest ones. The running container's image always survives.
+	ImageKeep int
 	// DefaultNodeVersion is passed to nixpacks when the application does not
 	// set NIXPACKS_NODE_VERSION itself.
 	DefaultNodeVersion string
@@ -114,6 +117,9 @@ type Pipeline struct {
 	sandboxImage string
 	// deployTimeout bounds one whole deployment.
 	deployTimeout time.Duration
+	// imageKeep drives the post-release image trim: keep N newest images per
+	// application repository. Zero falls back to 2.
+	imageKeep int
 	// defaultNodeVersion keeps nixpacks off its end-of-life Node 18 fallback.
 	defaultNodeVersion string
 
@@ -156,6 +162,7 @@ func NewPipeline(opts Options) *Pipeline {
 		sandboxMode:        sandboxMode,
 		sandboxImage:       opts.SandboxImage,
 		deployTimeout:      opts.DeployTimeout,
+		imageKeep:          opts.ImageKeep,
 		defaultNodeVersion: opts.DefaultNodeVersion,
 		running:            map[string]struct{}{},
 		cancel:             map[string]context.CancelFunc{},

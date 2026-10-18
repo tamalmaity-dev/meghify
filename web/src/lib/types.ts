@@ -234,6 +234,44 @@ export interface NodeMetrics {
   recordedAt: string;
 }
 
+/** One of the four Docker disk-usage categories, in bytes. */
+export interface DockerUsageReport {
+  total: number;
+  images: number;
+  containers: number;
+  volumes: number;
+  buildCache: number;
+}
+
+/** A large object behind the categories (an image, a volume, a container). */
+export interface DockerUsageItem {
+  name: string;
+  kind: "image" | "container" | "volume";
+  bytes: number;
+}
+
+/** What the build sandbox's own Docker daemon stores, when it is reachable. */
+export interface DockerSandboxUsage {
+  total: number;
+  images: number;
+  containers: number;
+  volumes: number;
+  buildCache: number;
+}
+
+export interface DockerDiskUsage {
+  engine: DockerUsageReport;
+  top: DockerUsageItem[];
+  sandbox?: DockerSandboxUsage;
+}
+
+/** What the built-in cleanup pass reclaimed, in bytes. */
+export interface DockerCleanupResult {
+  reclaimed: number;
+  imagesRemoved: number;
+  sandbox: boolean;
+}
+
 export interface APIToken {
   id: string;
   name: string;

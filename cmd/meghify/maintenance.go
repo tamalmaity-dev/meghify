@@ -7,7 +7,9 @@ import (
 	"math"
 	"time"
 
+	"github.com/tamalmaity-dev/meghify/internal/config"
 	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/deploy"
 	"github.com/tamalmaity-dev/meghify/internal/docker"
 )
 
@@ -85,8 +87,12 @@ func collectMetrics(ctx context.Context, store *db.Store, client *docker.Client)
 	})
 }
 
-// collectGarbage enforces the retention window and prunes unused artifacts.
-func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client, retentionDays int) error {
+// collectGarbage enforces the retention window and prunes unused artifacts:
+// stored rows, then Docker storage — dangling images, application images past
+// the retention count and a build cache held within its bound, on the engine
+// and inside the build sandbox.
+func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client, cfg *config.Config, logger *slog.Logger) error {
+	retentionDays := cfg.MetricsRetentionDays
 	if retentionDays <= 0 {
 		retentionDays = 14
 	}
@@ -108,9 +114,19 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 	if client == nil {
 		return nil
 	}
-	// Reclaim dangling images but leave the build cache alone: it makes the next
-	// build dramatically faster and the engine bounds its own size.
-	_, err := client.PruneImages(ctx)
+	protect := map[string]struct{}{}
+	if containers, err := client.ListContainers(ctx, "", ""); err == nil {
+		for _, container := range containers {
+			if container.Image != "" {
+				protect[container.Image] = struct{}{}
+			}
+		}
+	}
+	result, err := deploy.CleanupEngine(ctx, client, protect, cfg.ImageKeep, cfg.BuildCacheKeepBytes())
+	if (result.Reclaimed > 0 || result.ImagesRemoved > 0) && logger != nil {
+		logger.Info("docker cleanup reclaimed storage",
+			"bytes", result.Reclaimed, "images", result.ImagesRemoved, "sandbox", result.Sandbox)
+	}
 	return err
 }
 

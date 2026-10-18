@@ -118,6 +118,28 @@ container, removes orphaned helpers and deletes half-created rolling-release
 containers — so the next deploy is never blocked by a stuck row. Dokploy does
 the same at boot (`initCancelDeployments`).
 
+## Storage: images, build cache and cleanup
+
+Every build tags a fresh image stamp, so without care small VPS disks fill up
+quietly. Three guards keep it in check:
+
+- **Release trim** — right after a successful release the application's image
+  repository is cut down to the `IMAGE_KEEP` (default **2**) newest tags. The
+  image the running container serves from is always protected; the engine
+  refuses anything else in use, which fails the sweep harmlessly.
+- **Bounded build cache** — `BUILD_CACHE_KEEP` (default **8g**) caps the
+  Docker build cache, on the engine and inside the build sandbox. When larger,
+  a cleanup prunes it back down, keeping the most recently used records first
+  (nixpacks' `--cache-key` mounts survive as long as they fit the bound).
+  `0` disables the bound.
+- **Hourly gc** — the panel's `gc` job also sweeps dangling images on both
+  engines, the same pass that prunes old metrics rows.
+
+The dashboard's **Docker disk usage** card shows the four `docker system df`
+categories (images, build cache, volumes, containers), what the sandbox's own
+daemon holds, and the largest objects. **Free up space** runs the same cleanup
+pass on demand (`POST /api/docker/cleanup`).
+
 ## Every release is confirmed
 
 The rolling release starts the replacement first, health checks it (when the

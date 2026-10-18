@@ -1,0 +1,145 @@
+package docker
+
+import (
+	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types/image"
+)
+
+func summary(id string, repo string, tag string, created time.Time, size int64) image.Summary {
+	return image.Summary{
+		ID:       id,
+		RepoTags: []string{repo + ":" + tag},
+		Created:  int64(created.Unix()),
+		Size:     size,
+	}
+}
+
+// Each build tags a fresh stamp, so the repository grows one image per build:
+// keep must retain the newest and drop older ones, oldest first.
+func TestSelectReposToPruneKeepsNewest(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-old", "meghify.local/app", "abcd1234-100", base.Add(-2*time.Hour), 900<<20),
+		summary("id-mid", "meghify.local/app", "abcd1234-200", base.Add(-time.Hour), 900<<20),
+		summary("id-new", "meghify.local/app", "abcd1234-300", base, 900<<20),
+	}
+
+	victims := selectReposToPrune(images, 2, nil)
+	if len(victims) != 1 || victims[0].Tags[0] != "meghify.local/app:abcd1234-100" {
+		t.Fatalf("victims = %+v, want only the oldest tag", victims)
+	}
+	if victims[0].Bytes != 900<<20 {
+		t.Errorf("victim bytes = %d, want the image size", victims[0].Bytes)
+	}
+}
+
+// Protected tags never die, even when they fall outside the keep window: a
+// running container still serves from them. A protected image is also skipped
+// (not a victim) when the keep window has already passed over it.
+func TestSelectReposToPruneProtectsTags(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-old", "meghify.local/app", "x-100", base.Add(-8*time.Hour), 1),
+		summary("id-serving", "meghify.local/app", "y-200", base.Add(-5*time.Hour), 2),
+		summary("id-new", "meghify.local/app", "z-300", base, 3),
+	}
+	protect := map[string]struct{}{"meghify.local/app:y-200": {}}
+
+	victims := selectReposToPrune(images, 2, protect)
+	if len(victims) != 1 || victims[0].Tags[0] != "meghify.local/app:x-100" {
+		t.Fatalf("victims = %+v, want only x-100 (y-200 protected, z-300 inside the window)", victims)
+	}
+
+	// With keep=1 the newest image owns the window; the protected middle image
+	// must still not become a victim, while the oldest one does.
+	victims = selectReposToPrune(images, 1, protect)
+	if len(victims) != 1 || victims[0].Tags[0] != "meghify.local/app:x-100" {
+		t.Fatalf("victims = %+v, want only x-100 again", victims)
+	}
+}
+
+// Dangling images carry no tags and belong to a dedicated prune, never the
+// retention sweep.
+func TestSelectReposToPruneIgnoresDangling(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		{ID: "id-dangling", Created: int64(base.Add(-time.Hour).Unix()), Size: 42},
+		summary("id-one", "meghify.local/app", "a-1", base, 1),
+	}
+	if victims := selectReposToPrune(images, 1, nil); len(victims) != 0 {
+		t.Fatalf("victims = %+v, want none", victims)
+	}
+}
+
+// Two tags on one image inside one repository remove together; tags across
+// different repositories are decided per repository.
+func TestSelectReposToPruneGroupsByRepository(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	double := summary("id-double", "meghify.local/app", "t-1", base, 7)
+	double.RepoTags = []string{"meghify.local/app:t-1", "meghify.local/app:t-1b"}
+
+	images := []image.Summary{
+		double,
+		summary("id-old", "meghify.local/app", "t-0", base.Add(-time.Hour), 5),
+	}
+
+	victims := selectReposToPrune(images, 1, nil)
+	if len(victims) != 1 {
+		t.Fatalf("victims = %+v, want the single old image", victims)
+	}
+	if len(victims[0].Tags) != 1 || victims[0].Tags[0] != "meghify.local/app:t-0" {
+		t.Fatalf("victim tags = %v, want the old tag only", victims[0].Tags)
+	}
+}
+
+// Repositories keep separate retention: trimming one application leaves the
+// other's images alone when they are within its own keep window.
+func TestSelectReposToPruneSeparatesApplications(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-a-old", "meghify.local/app-a", "s-1", base.Add(-time.Hour), 1),
+		summary("id-b-old", "meghify.local/app-b", "s-1", base.Add(-time.Hour), 2),
+		summary("id-b-new", "meghify.local/app-b", "s-2", base, 3),
+	}
+
+	victims := selectReposToPrune(images, 1, nil)
+	if len(victims) != 1 {
+		t.Fatalf("victims = %+v, want exactly one", victims)
+	}
+	// app-a's only image is inside its own keep window; app-b's older one is
+	// not.
+	if victims[0].Tags[0] != "meghify.local/app-b:s-1" {
+		t.Fatalf("victim tag = %v, want app-b's old image", victims[0].Tags)
+	}
+}
+
+// A registry with a port keeps its host in the repository name.
+func TestRepoOfWithPortedRegistry(t *testing.T) {
+	cases := map[string]string{
+		"meghify.local/app:tag-1":              "meghify.local/app",
+		"registry.example:5000/team/app:tag-1": "registry.example:5000/team/app",
+		"app":                                  "app",
+		"meghify.local/app":                    "meghify.local/app",
+		"":                                     "",
+		"<none>":                               "",
+	}
+	for tag, want := range cases {
+		if got := repoOf(tag); got != want {
+			t.Errorf("repoOf(%q) = %q, want %q", tag, got, want)
+		}
+	}
+}
+
+func TestSplitVersion(t *testing.T) {
+	if major, minor, ok := splitVersion("1.51"); !ok || major != 1 || minor != 51 {
+		t.Fatalf("splitVersion(1.51) = %d/%d/%t", major, minor, ok)
+	}
+	if _, _, ok := splitVersion("v1.48"); !ok {
+		t.Fatal("leading v should be tolerated")
+	}
+	if _, _, ok := splitVersion("garbage"); ok {
+		t.Fatal("garbage must not parse")
+	}
+}

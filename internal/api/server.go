@@ -221,6 +221,13 @@ func (s *Server) Router() http.Handler {
 			r.Post("/{id}/deploy", s.deployService)
 		})
 
+		// The Docker estate the panel owns on this node: a storage breakdown
+		// for the dashboard card and a manual cleanup pass.
+		r.Route("/docker", func(r chi.Router) {
+			r.Get("/df", s.dockerDiskUsage)
+			r.Post("/cleanup", s.dockerCleanup)
+		})
+
 		r.Route("/deployments", func(r chi.Router) {
 			r.Get("/{id}", s.getDeployment)
 			r.Get("/{id}/logs", s.deploymentLogs)

@@ -11,6 +11,7 @@ import {
 import { api, formatBytes } from "@/lib/api";
 import { PageHeader } from "@/components/app-shell";
 import { SystemMetrics } from "@/components/system-metrics";
+import { DockerDiskUsage } from "@/components/docker-disk";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
@@ -55,6 +56,8 @@ export function DashboardPage() {
       />
 
       <SystemMetrics />
+
+      <DockerDiskUsage />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile

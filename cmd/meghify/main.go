@@ -139,6 +139,7 @@ func run() error {
 		SandboxMode:        cfg.BuildSandbox,
 		SandboxImage:       cfg.BuildSandboxImage,
 		DeployTimeout:      cfg.DeployTimeout,
+		ImageKeep:          cfg.ImageKeep,
 		DefaultNodeVersion: cfg.BuildDefaultNodeVersion,
 	})
 
@@ -273,7 +274,7 @@ func registerJobs(
 	})
 
 	runner.Register(db.JobGC, func(ctx context.Context, payload string) error {
-		return collectGarbage(ctx, store, client, cfg.MetricsRetentionDays)
+		return collectGarbage(ctx, store, client, cfg, logger)
 	})
 
 	runner.Register(db.JobBackup, func(ctx context.Context, payload string) error {
@@ -304,7 +305,7 @@ func registerJobs(
 	// days — or upgraded from a release that queued telemetry — is tidied
 	// immediately instead of an hour later.
 	time.AfterFunc(20*time.Second, func() {
-		if err := collectGarbage(context.Background(), store, client, cfg.MetricsRetentionDays); err != nil {
+		if err := collectGarbage(context.Background(), store, client, cfg, logger); err != nil {
 			logger.Warn("startup cleanup failed", "error", err)
 		}
 	})

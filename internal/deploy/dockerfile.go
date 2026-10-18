@@ -629,7 +629,31 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 
 	p.store.Applications.PatchApplicationImage(ctx, app.ID, imageRef)
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusRunning)
+
+	// Every build tags a fresh stamp, so the repository grows forever without
+	// a trim: drop everything but the newest two (the engine refuses images a
+	// running container still uses, which is the safety valve here).
+	p.trimReleaseImages(ctx, sink, app, imageRef)
 	return nil
+}
+
+// trimReleaseImages prunes old tagged releases of the application's
+// repository right after a successful release. Best effort: a busy engine or
+// an in-use image skips the pass, and the hourly GC job re-checks anyway.
+func (p *Pipeline) trimReleaseImages(ctx context.Context, sink io.Writer, app *db.Application, current string) {
+	if p.client == nil {
+		return
+	}
+	keep := p.imageKeep
+	if keep < 1 {
+		keep = 2
+	}
+	reclaimed, removed, err := p.client.PruneImageRepos(ctx, keep, map[string]struct{}{current: {}})
+	if err != nil || removed == 0 {
+		return
+	}
+	sink.Write([]byte(fmt.Sprintf("[ok] trimmed %d old image(s) of %s (~%s reclaimed)\n",
+		removed, app.Name, formatBytes(reclaimed))))
 }
 
 // runContainerCommand executes a shell command inside a container and streams
