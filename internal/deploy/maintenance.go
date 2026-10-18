@@ -36,10 +36,11 @@ type CleanupResult struct {
 
 // CleanupEngine reclaims Docker storage everywhere the panel is responsible
 // for it: dangling images, application images past the retention count, the
-// build cache — on the engine and inside the build sandbox. Failures are
-// joined into the returned error while every remaining step still runs, so a
-// sandbox hiccup cannot block an engine cleanup.
-func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, imageKeep int, cacheKeep int64) (CleanupResult, error) {
+// build cache — on the engine and inside the build sandbox — and superseded
+// helper image versions. Failures are joined into the returned error while
+// every remaining step still runs, so a sandbox hiccup cannot block an engine
+// cleanup.
+func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, imageKeep int, cacheKeep int64, helperImage string) (CleanupResult, error) {
 	var result CleanupResult
 	if client == nil {
 		return result, nil
@@ -58,6 +59,18 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 	} else {
 		result.Reclaimed += bytes
 		result.ImagesRemoved = int64(removed)
+	}
+
+	// Older helper versions are obsolete the moment the panel upgrades; the
+	// repository is entirely the panel's, so every other tag can go. The
+	// in-use one is protected and the engine refuses deletions under live
+	// containers anyway.
+	if repo := docker.RepoOf(helperImage); repo != "" {
+		if bytes, _, err := client.PruneRepoExcept(ctx, repo, helperImage); err != nil {
+			errs = append(errs, err)
+		} else {
+			result.Reclaimed += bytes
+		}
 	}
 
 	if cacheKeep > 0 {

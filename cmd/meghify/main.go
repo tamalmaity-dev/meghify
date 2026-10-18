@@ -126,7 +126,7 @@ func run() error {
 		},
 		Emitter:          hub,
 		GitToken:         gitHubCredential(store, authService, logger),
-		HelperImage:      resolvedHelperImage(cfg),
+		HelperImage:      cfg.EffectiveHelperImage(),
 		HelperSocket:     dockerSocketPath(cfg.DockerHost),
 		ProxyImage:       cfg.ProxyImage,
 		ProxyEmail:       cfg.ACMEEmail,
@@ -140,6 +140,7 @@ func run() error {
 		SandboxImage:       cfg.BuildSandboxImage,
 		DeployTimeout:      cfg.DeployTimeout,
 		ImageKeep:          cfg.ImageKeep,
+		BuildCacheKeep:     cfg.BuildCacheKeepBytes(),
 		DefaultNodeVersion: cfg.BuildDefaultNodeVersion,
 	})
 
@@ -319,20 +320,6 @@ func dockerSocketPath(host string) string {
 		return strings.TrimPrefix(host, "unix://")
 	}
 	return "/var/run/docker.sock"
-}
-
-// resolvedHelperImage picks the build helper image: BUILD_HELPER_IMAGE wins,
-// otherwise the image published for this exact panel release. Development
-// builds fall back to :latest.
-func resolvedHelperImage(cfg *config.Config) string {
-	if image := strings.TrimSpace(cfg.BuildHelperImage); image != "" {
-		return image
-	}
-	tag := strings.TrimPrefix(version.Version, "v")
-	if tag == "" || tag == "dev" {
-		return "ghcr.io/tamalmaity-dev/meghify-helper:latest"
-	}
-	return "ghcr.io/tamalmaity-dev/meghify-helper:v" + tag
 }
 
 // parseByteSize converts "512m", "2g" or a plain byte count into bytes.

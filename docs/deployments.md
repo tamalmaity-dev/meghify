@@ -128,10 +128,15 @@ quietly. Three guards keep it in check:
   image the running container serves from is always protected; the engine
   refuses anything else in use, which fails the sweep harmlessly.
 - **Bounded build cache** — `BUILD_CACHE_KEEP` (default **8g**) caps the
-  Docker build cache, on the engine and inside the build sandbox. When larger,
-  a cleanup prunes it back down, keeping the most recently used records first
-  (nixpacks' `--cache-key` mounts survive as long as they fit the bound).
-  `0` disables the bound.
+  Docker build cache, on the engine and inside the build sandbox. The bound is
+  enforced right after every release, not only at cleanup time, and a prune
+  keeps the most recently used records first (nixpacks' `--cache-key` mounts
+  survive as long as they fit the bound). `0` disables the bound.
+- **Superseded helpers die with the release** — images from the helper
+  repository that do not match the running panel's helper (older
+  `meghify-helper:v0.6.x` tags after an upgrade) are removed by every cleanup
+  pass. A pinned `BUILD_HELPER_IMAGE` is exactly what survives; application
+  repositories and images the operator brought themselves are out of scope.
 - **Hourly gc** — the panel's `gc` job also sweeps dangling images on both
   engines, the same pass that prunes old metrics rows.
 

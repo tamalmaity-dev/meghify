@@ -13,6 +13,8 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	units "github.com/docker/go-units"
+
+	"github.com/tamalmaity-dev/meghify/internal/version"
 )
 
 // Dialect is the active database driver.
@@ -223,6 +225,21 @@ func (c *Config) BuildCacheKeepBytes() int64 {
 		return 0
 	}
 	return *c.buildCacheKeepBytes
+}
+
+// EffectiveHelperImage resolves the build helper image: BUILD_HELPER_IMAGE
+// wins, otherwise the image published for this exact panel release.
+// Development builds fall back to :latest. The cleanup pass derives the
+// helper's repository from it, so superseded release versions can be pruned.
+func (c *Config) EffectiveHelperImage() string {
+	if image := strings.TrimSpace(c.BuildHelperImage); image != "" {
+		return image
+	}
+	tag := strings.TrimPrefix(version.Version, "v")
+	if tag == "" || tag == "dev" {
+		return "ghcr.io/tamalmaity-dev/meghify-helper:latest"
+	}
+	return "ghcr.io/tamalmaity-dev/meghify-helper:v" + tag
 }
 
 // IsProduction reports whether the panel runs in production mode.

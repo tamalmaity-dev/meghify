@@ -55,7 +55,7 @@ func (s *Server) dockerCleanup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := deploy.CleanupEngine(r.Context(), s.docker, protect, s.cfg.ImageKeep, s.cfg.BuildCacheKeepBytes())
+	result, err := deploy.CleanupEngine(r.Context(), s.docker, protect, s.cfg.ImageKeep, s.cfg.BuildCacheKeepBytes(), s.cfg.EffectiveHelperImage())
 	if result.Reclaimed > 0 || result.ImagesRemoved > 0 {
 		s.logger.Info("manual docker cleanup reclaimed storage",
 			"bytes", result.Reclaimed, "images", result.ImagesRemoved, "sandbox", result.Sandbox)

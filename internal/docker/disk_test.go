@@ -143,3 +143,59 @@ func TestSplitVersion(t *testing.T) {
 		t.Fatal("garbage must not parse")
 	}
 }
+
+// Every release leaves its predecessor's helper image behind; a cleanup pass
+// keeps only the helper the running panel actually uses.
+func TestSelectRepoExceptionsKeepsCurrentHelper(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-v1", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.6.1", base.Add(-2*time.Hour), 276<<20),
+		summary("id-v2", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.6.2", base.Add(-time.Hour), 276<<20),
+		summary("id-v3", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.6.3", base, 276<<20),
+	}
+
+	victims := selectRepoExceptions(images, "ghcr.io/tamalmaity-dev/meghify-helper", "ghcr.io/tamalmaity-dev/meghify-helper:v0.6.3")
+	if len(victims) != 2 {
+		t.Fatalf("victims = %+v, want the two old helpers", victims)
+	}
+	for _, victim := range victims {
+		if victim.Tags[0] == "ghcr.io/tamalmaity-dev/meghify-helper:v0.6.3" {
+			t.Fatalf("current helper %v must survive", victim.Tags)
+		}
+		if victim.Bytes != 276<<20 {
+			t.Errorf("victim bytes = %d, want the image size", victim.Bytes)
+		}
+	}
+}
+
+// The helper sweep only touches the helper repository: application release
+// images, the sandbox image and other registries are out of scope.
+func TestSelectRepoExceptionsScopedToRepository(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-helper", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.6.1", base, 9),
+		summary("id-app", "meghify.local/roopsa-web", "bf50f017-1", base, 2<<30),
+		summary("id-dind", "docker", "29-dind", base, 441<<20),
+		{ID: "id-dangling", Created: int64(base.Unix()), Size: 7},
+	}
+
+	if victims := selectRepoExceptions(images, "ghcr.io/tamalmaity-dev/meghify-helper", "ghcr.io/tamalmaity-dev/meghify-helper:v0.6.3"); len(victims) != 1 || victims[0].Tags[0] != "ghcr.io/tamalmaity-dev/meghify-helper:v0.6.1" {
+		t.Fatalf("victims = %+v, want only the stray old helper", victims)
+	}
+}
+
+// An image tagged with the kept reference and an extra tag in the same
+// repository loses only the extra tag; the kept reference holds the layers.
+func TestSelectRepoExceptionsUntanglesSharedImage(t *testing.T) {
+	base := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	shared := summary("id-shared", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.6.3", base, 5)
+	shared.RepoTags = []string{
+		"ghcr.io/tamalmaity-dev/meghify-helper:v0.6.3",
+		"ghcr.io/tamalmaity-dev/meghify-helper:latest",
+	}
+
+	victims := selectRepoExceptions([]image.Summary{shared}, "ghcr.io/tamalmaity-dev/meghify-helper", "ghcr.io/tamalmaity-dev/meghify-helper:v0.6.3")
+	if len(victims) != 1 || len(victims[0].Tags) != 1 || victims[0].Tags[0] != "ghcr.io/tamalmaity-dev/meghify-helper:latest" {
+		t.Fatalf("victims = %+v, want only the :latest tag removed", victims)
+	}
+}

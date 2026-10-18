@@ -90,6 +90,60 @@ type pruneCandidate struct {
 	Bytes int64
 }
 
+// PruneRepoExcept removes every image of one repository except the keepTag
+// reference (in-use images refuse deletion and are skipped). Returns an
+// estimated reclaimed byte count and the number of images removed.
+func (c *Client) PruneRepoExcept(ctx context.Context, repo string, keepTag string) (int64, int, error) {
+	if repo == "" {
+		return 0, 0, nil
+	}
+	list, err := c.cli.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return 0, 0, fmt.Errorf("list images: %w", err)
+	}
+
+	reclaimed, removed := int64(0), 0
+	for _, victim := range selectRepoExceptions(list, repo, keepTag) {
+		failed := false
+		for _, tag := range victim.Tags {
+			if err := c.RemoveImage(ctx, tag); err != nil {
+				// A container (a running build helper, for example) still
+				// uses this image — leave the whole thing for the next pass.
+				failed = true
+				break
+			}
+		}
+		if failed {
+			continue
+		}
+		removed++
+		reclaimed += victim.Bytes
+	}
+	return reclaimed, removed, nil
+}
+
+// selectRepoExceptions lists the images of one repository whose tags are all
+// different from keepTag, together with the tags to remove. Pure and unit
+// tested.
+func selectRepoExceptions(images []image.Summary, repo string, keepTag string) []pruneCandidate {
+	var victims []pruneCandidate
+	for _, summary := range images {
+		repoTags := make([]string, 0, len(summary.RepoTags))
+		for _, tag := range summary.RepoTags {
+			if repoOf(tag) == repo && tag != keepTag {
+				repoTags = append(repoTags, tag)
+			}
+		}
+		if len(summary.RepoTags) == 0 || len(repoTags) == 0 {
+			continue
+		}
+		// Removing only this repository's tags is safe either way: references
+		// outside it (other tags on the same image) keep the layers alive.
+		victims = append(victims, pruneCandidate{Tags: repoTags, Bytes: summary.Size})
+	}
+	return victims
+}
+
 // PruneImageRepos keeps the newest keep images of every repository that still
 // carries at least one tag (each build is tagged with a fresh stamp, so
 // repositories otherwise grow forever) and removes the rest. Tags listed in
@@ -197,6 +251,10 @@ func repoOf(tag string) string {
 	}
 	return tag
 }
+
+// RepoOf exports the repository/holder split of a full image reference for
+// callers outside the package; see repoOf.
+func RepoOf(tag string) string { return repoOf(tag) }
 
 func protected(summary image.Summary, protect map[string]struct{}) bool {
 	for _, tag := range summary.RepoTags {

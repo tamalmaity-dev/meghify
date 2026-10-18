@@ -78,6 +78,9 @@ type Options struct {
 	// ImageKeep is how many built images per application survive a cleanup:
 	// the newest ones. The running container's image always survives.
 	ImageKeep int
+	// BuildCacheKeep bounds the build cache in bytes after every release and
+	// on cleanup passes; zero leaves it unbounded.
+	BuildCacheKeep int64
 	// DefaultNodeVersion is passed to nixpacks when the application does not
 	// set NIXPACKS_NODE_VERSION itself.
 	DefaultNodeVersion string
@@ -120,6 +123,9 @@ type Pipeline struct {
 	// imageKeep drives the post-release image trim: keep N newest images per
 	// application repository. Zero falls back to 2.
 	imageKeep int
+	// buildCacheKeep drives the post-release cache trim; zero leaves the
+	// cache unbounded.
+	buildCacheKeep int64
 	// defaultNodeVersion keeps nixpacks off its end-of-life Node 18 fallback.
 	defaultNodeVersion string
 
@@ -163,6 +169,7 @@ func NewPipeline(opts Options) *Pipeline {
 		sandboxImage:       opts.SandboxImage,
 		deployTimeout:      opts.DeployTimeout,
 		imageKeep:          opts.ImageKeep,
+		buildCacheKeep:     opts.BuildCacheKeep,
 		defaultNodeVersion: opts.DefaultNodeVersion,
 		running:            map[string]struct{}{},
 		cancel:             map[string]context.CancelFunc{},

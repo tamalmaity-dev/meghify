@@ -634,6 +634,9 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 	// a trim: drop everything but the newest two (the engine refuses images a
 	// running container still uses, which is the safety valve here).
 	p.trimReleaseImages(ctx, sink, app, imageRef)
+	// The cache bound is otherwise enforced only by the GC job; a busy build
+	// can push the cache past it between two passes.
+	p.boundBuildCache(ctx, sink)
 	return nil
 }
 
@@ -654,6 +657,30 @@ func (p *Pipeline) trimReleaseImages(ctx context.Context, sink io.Writer, app *d
 	}
 	sink.Write([]byte(fmt.Sprintf("[ok] trimmed %d old image(s) of %s (~%s reclaimed)\n",
 		removed, app.Name, formatBytes(reclaimed))))
+}
+
+// boundBuildCache pulls the build cache back under BUILD_CACHE_KEEP right
+// after a release, on the engine and inside the sandbox. The most recent
+// cache records — the ones a follow-up build reuses — survive a prune, so
+// this costs a short pause, not the warm cache. Best effort: failures fall
+// back to the GC job.
+func (p *Pipeline) boundBuildCache(ctx context.Context, sink io.Writer) {
+	if p.client == nil || p.buildCacheKeep <= 0 {
+		return
+	}
+	var reclaimed int64
+	if bytes, err := p.client.BuildCachePruneKeep(ctx, p.buildCacheKeep); err == nil {
+		reclaimed += bytes
+	}
+	if bytes, _, err := PruneSandbox(ctx, p.client, p.buildCacheKeep); err == nil {
+		reclaimed += bytes
+	}
+	// Trimming a few megabytes is noise; the hourly GC job runs the pass
+	// regardless.
+	if reclaimed > 64<<20 {
+		sink.Write([]byte(fmt.Sprintf("[ok] build cache bounded to %s (~%s reclaimed)\n",
+			formatBytes(p.buildCacheKeep), formatBytes(reclaimed))))
+	}
 }
 
 // runContainerCommand executes a shell command inside a container and streams
