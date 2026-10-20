@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tamalmaity-dev/meghify/internal/config"
@@ -102,6 +106,20 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 	if _, err := store.Jobs.PruneJobs(ctx, time.Now().AddDate(0, 0, -7)); err != nil {
 		return err
 	}
+	// Deployment logs follow their rows: 30 days of history is plenty for a
+	// self-hosted panel, and build output can be hundreds of megabytes.
+	if paths, err := store.Deployments.PruneDeploymentsBefore(ctx, time.Now().AddDate(0, 0, -30)); err != nil {
+		if logger != nil {
+			logger.Warn("could not prune old deployments", "error", err)
+		}
+	} else {
+		logRoot := filepath.Join(cfg.DataDir, "deployments")
+		for _, path := range paths {
+			if managedPathUnder(logRoot, path) {
+				_ = os.Remove(path)
+			}
+		}
+	}
 	// Host-metrics sampling no longer enters the queue, but panels upgraded from
 	// older releases still hold thousands of rows: clear them within the hour.
 	if _, err := store.Jobs.PruneJobsByKind(ctx, db.JobNodeMetrics, time.Now().Add(-time.Hour)); err != nil {
@@ -148,12 +166,31 @@ func runBackup(ctx context.Context, store *db.Store, backupID string, logger *sl
 	if err != nil {
 		return err
 	}
-	logger.Info("backing up database", "backup", backupID, "database", database.Name, "kind", database.Kind)
-	return store.Resources.FinishBackup(ctx, backupID, db.StatusRunning, 0, "")
+	// Do not leave a row in "running" forever. The dump/upload half of this
+	// feature is deliberately deferred; fail visibly until it exists.
+	const reason = "backup artifacts are not implemented in this release"
+	logger.Warn("database backup is not implemented",
+		"backup", backupID, "database", database.Name, "kind", database.Kind)
+	if err := store.Resources.FinishBackup(ctx, backupID, db.StatusError, 0, reason); err != nil {
+		return err
+	}
+	return errors.New(reason)
 }
 
 type unsupportedBackupTargetError struct{ target string }
 
 func (e *unsupportedBackupTargetError) Error() string {
 	return "backups are not supported for target " + e.target
+}
+
+// managedPathUnder refuses to unlink anything outside the panel-owned log
+// directory, even if a database row was tampered with.
+func managedPathUnder(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

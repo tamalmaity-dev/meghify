@@ -94,6 +94,63 @@ func TestJobBackoffSchedulesARetry(t *testing.T) {
 	}
 }
 
+func TestJobRecoveryRequeuesOnlyRunningJobs(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	running, err := store.Jobs.Enqueue(ctx, "deploy", `{}`, time.Now(), 3)
+	if err != nil {
+		t.Fatalf("enqueue running: %v", err)
+	}
+	if _, err := store.Jobs.Claim(ctx); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// A manual retry must not hand a live job to a second worker.
+	if err := store.Jobs.Requeue(ctx, running.ID); err == nil {
+		t.Fatal("Requeue accepted a running job")
+	}
+
+	count, err := store.Jobs.RequeueRunning(ctx)
+	if err != nil {
+		t.Fatalf("requeue running: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("requeued = %d, want 1", count)
+	}
+	recovered, err := store.Jobs.JobByID(ctx, running.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if recovered.Status != db.JobPending {
+		t.Fatalf("status = %q, want pending", recovered.Status)
+	}
+	claimed, err := store.Jobs.Claim(ctx)
+	if err != nil || claimed == nil || claimed.ID != running.ID {
+		t.Fatalf("recovered job was not claimable: job=%v err=%v", claimed, err)
+	}
+}
+
+func TestJobRequeueRejectsAnActiveRetry(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	job, err := store.Jobs.Enqueue(ctx, "deploy", `{}`, time.Now(), 3)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := store.Jobs.Claim(ctx); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := store.Jobs.Fail(ctx, job.ID, "boom"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	// Retrying is scheduled work, not a dead letter: manual retry must not
+	// create a duplicate execution alongside the scheduled one.
+	if err := store.Jobs.Requeue(ctx, job.ID); err == nil {
+		t.Fatal("Requeue accepted a retrying job")
+	}
+}
+
 func TestJobDeadLettersAfterMaxAttempts(t *testing.T) {
 	store := openStore(t)
 	ctx := context.Background()

@@ -44,6 +44,8 @@ export interface Node {
   sshPort: number;
   sshUser: string;
   sshKeyId?: string;
+  /** SHA256 SSH host key pinned on first use; empty means trust-on-first-use. */
+  hostKeyFingerprint?: string;
   status: "pending" | "online" | "offline" | "error" | "installing";
   os: string;
   kernel: string;
@@ -215,7 +217,6 @@ export interface Volume {
   target: string;
   targetId: string;
   name: string;
-  hostPath: string;
   mountPath: string;
   readOnly: boolean;
   createdAt: string;

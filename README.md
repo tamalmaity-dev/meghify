@@ -32,9 +32,8 @@ Meghify (Go + SQLite)       ~16 MB           ~0%             1
 - **Route domains** with automatic HTTPS through Traefik.
 - **Manage several servers** from one dashboard over SSH.
 - **Stream build and runtime logs** live.
-- **Open a shell** inside any running container.
+- **Open a shell** inside any running container (admins).
 - **Automate work** with a durable job queue that needs no Redis.
-- **Back up** databases on a schedule.
 
 ---
 
@@ -66,15 +65,17 @@ That is close to the worst case for an interpreted runtime and the best case for
 a compiled one. The React SPA is compiled into the binary with `embed`, so
 production is one file and one process.
 
-**SQLite by default, Postgres optional.** The control plane does not need a
-networked database. SQLite in WAL mode inside the panel process costs no extra
-memory and no extra container. `DB_DRIVER=postgres` switches to the same schema
-for anyone who wants a networked store later.
+**SQLite, in-process.** The control plane does not need a networked database.
+SQLite in WAL mode inside the panel process costs no extra memory and no extra
+container. The repository carries a Postgres schema, but Postgres is not
+supported in this release: the SQL uses SQLite placeholders, the migrations are
+not portable yet, and there is no integration test. Treat `DB_DRIVER=sqlite` as
+the only working option.
 
 **No Redis.** The job queue is a table. Workers claim rows with a guarded
-`UPDATE`, so several panel replicas could share the queue without a lock
-service. Cron schedules fire by enqueuing, which means a restart never loses a
-schedule.
+`UPDATE`; this release still runs one panel instance against SQLite, and
+multi-instance/HA deployment is deferred. Cron schedules fire by enqueuing,
+which means a restart never loses a schedule.
 
 **SSE for logs, WebSocket only for the terminal.** Deployment output and status
 flow one way, so a server-sent event is cheaper to hold open than a WebSocket
@@ -92,7 +93,7 @@ proxy API calls.
 | Layer | Choice |
 |---|---|
 | Backend | Go 1.26, `net/http` + chi |
-| Database | SQLite (WAL) via `modernc.org/sqlite`, optional Postgres via `pgx` |
+| Database | SQLite (WAL) via `modernc.org/sqlite`; Postgres is not supported yet |
 | Queries | `database/sql` with typed repositories |
 | Migrations | Plain SQL files, applied at boot, one per dialect |
 | Auth | Argon2id, opaque session tokens, TOTP 2FA, `megh_`-prefixed API tokens |
@@ -117,9 +118,14 @@ cd meghify
 cp .env.example .env
 
 # 2. Set the secret that encrypts credentials at rest
-echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env
+SECRET=$(openssl rand -hex 32)
+sed -i "s|^AUTH_SECRET=.*|AUTH_SECRET=$SECRET|" .env
 
-# 3. Run
+# 3. Let the nonroot panel container use the host Docker socket
+SOCKET_GID=$(stat -c '%g' /var/run/docker.sock)
+sed -i "s|^DOCKER_GID=.*|DOCKER_GID=$SOCKET_GID|" .env
+
+# 4. Run
 docker compose up -d
 ```
 
@@ -242,7 +248,7 @@ on `:5173` and proxies `/api` and the SSE stream to the Go panel on `:8080`.
 | `POST` `/api/auth/bootstrap` | Create the first admin |
 | `POST` `/api/auth/login` | Sign in |
 | `GET` `/api/stream?channel=deployment:<id>` | Live build output |
-| `GET` `/api/applications/{id}/terminal` | Container shell (WebSocket) |
+| `GET` `/api/applications/{id}/terminal` | Container shell (WebSocket, admin) |
 | `GET` `/openapi.json` | API schema (planned) |
 
 ---
@@ -255,11 +261,13 @@ default. The ones that matter:
 | Variable | Default | Notes |
 |---|---|---|
 | `AUTH_SECRET` | (required) | Encrypts secrets at rest. Losing it means re-entering every stored credential. |
-| `DB_DRIVER` | `sqlite` | Or `postgres`. |
+| `DB_DRIVER` | `sqlite` | SQLite only in this release. |
 | `DB_DSN` | `$DATA_DIR/meghify.db` | Derived from `DATA_DIR` when unset. |
 | `DATA_DIR` | `/data` | Holds the database, build logs, and workspaces. |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | The engine the panel talks to. |
-| `WORKER_CONCURRENCY` | `4` | Concurrent deploys and backups. |
+| `DOCKER_GID` | (required in Compose) | Host group that owns the Docker socket, so the nonroot container can use it. |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` only behind your own reverse proxy. |
+| `WORKER_CONCURRENCY` | `4` | Concurrent jobs. |
 | `REGISTRY_URL` | (empty) | When set, built images are pushed. When empty, they stay on the build node. |
 
 ---
@@ -303,16 +311,22 @@ that means practically:
 - Set `PANEL_PUBLIC_URL` to an `https://` origin in production; the session
   cookie is then marked `Secure` and HSTS is sent.
 
-Known gaps in the current version: SSH host keys are not pinned, and there is no
-CSRF token (the API relies on cookie `SameSite=Lax` and JSON-only requests).
+Known gaps in the current version: database backup jobs fail with an explicit
+not-implemented error (there is no dump/upload artifact or schedule runner yet),
+provisioned databases are not automatically linked into application networks,
+and there is no CSRF token (the API relies on cookie `SameSite=Lax`, JSON-only
+requests and same-origin WebSocket checks).
+
+SSH host keys are pinned on first connection and can be supplied up front on the
+server form. Supply the fingerprint out of band when the first connection crosses
+an untrusted network.
 
 ---
 
 ## Roadmap
 
 - Git webhooks with pull-request preview deploys
-- S3 backup destinations
-- Node metric history and charts
+- S3 backup destinations and real database dumps
 - One-click service templates
 - OpenAPI schema and a generated TypeScript client
 - Role-based access control

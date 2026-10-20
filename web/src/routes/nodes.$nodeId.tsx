@@ -51,6 +51,7 @@ export function NodeDetailPage() {
     address: "",
     sshUser: "root",
     sshPort: 22,
+    hostKeyFingerprint: "",
   });
   useEffect(() => {
     if (!node.data) return;
@@ -60,6 +61,7 @@ export function NodeDetailPage() {
       address: node.data.address,
       sshUser: node.data.sshUser || "root",
       sshPort: node.data.sshPort || 22,
+      hostKeyFingerprint: node.data.hostKeyFingerprint ?? "",
     });
   }, [node.data]);
 
@@ -294,6 +296,24 @@ export function NodeDetailPage() {
                       />
                     </div>
                   </div>
+                  {!isLocal && (
+                    <div>
+                      <Label htmlFor="node-host-key">SSH host key fingerprint</Label>
+                      <Input
+                        id="node-host-key"
+                        value={form.hostKeyFingerprint}
+                        onChange={(event) =>
+                          setForm({ ...form, hostKeyFingerprint: event.target.value })
+                        }
+                        placeholder="SHA256:... (pinned on first connection)"
+                        className="font-mono"
+                      />
+                      <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+                        Pinned automatically the first time the panel connects. Paste the
+                        server&apos;s key first if you want to pin before connecting.
+                      </p>
+                    </div>
+                  )}
                   {isLocal && (
                     <p className="flex items-center gap-1.5 text-[11px] text-black/45 dark:text-white/40">
                       <ShieldCheck className="h-3.5 w-3.5" />

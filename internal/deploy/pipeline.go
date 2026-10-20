@@ -40,12 +40,15 @@ type RegistryConfig struct {
 
 // Options configures the pipeline.
 type Options struct {
-	Store    *db.Store
-	Secrets  SecretBox
-	Client   *docker.Client
-	DataDir  string
-	Registry RegistryConfig
-	Emitter  Emitter
+	Store   *db.Store
+	Secrets SecretBox
+	// Client is the local engine. ClientFor resolves an application's target
+	// node; when nil, every deployment uses Client.
+	Client    *docker.Client
+	ClientFor func(ctx context.Context, nodeID string) (*docker.Client, error)
+	DataDir   string
+	Registry  RegistryConfig
+	Emitter   Emitter
 	// GitToken mints a credential for an application that clones private
 	// repositories. Optional: public repositories clone anonymously.
 	GitToken GitCredentialResolver
@@ -98,6 +101,8 @@ type Pipeline struct {
 	store        *db.Store
 	secrets      SecretBox
 	client       *docker.Client
+	clientFor    func(ctx context.Context, nodeID string) (*docker.Client, error)
+	clientErr    error
 	dataDir      string
 	registry     RegistryConfig
 	emitter      Emitter
@@ -129,13 +134,16 @@ type Pipeline struct {
 	// defaultNodeVersion keeps nixpacks off its end-of-life Node 18 fallback.
 	defaultNodeVersion string
 
-	mu      sync.Mutex
+	// mu is a pointer because a per-node pipeline shares the queues, helpers
+	// and cancellation state of its parent. Copying a sync.Mutex would make
+	// the copies independent.
+	mu      *sync.Mutex
 	running map[string]struct{}
 	// cancel holds the cancel function of an in-flight deployment; helpers
-	// tracks the build helper containers it created so a cancellation can
-	// take them down immediately.
+	// tracks the build helper containers it created, together with the engine
+	// they live on, so a cancellation can take them down immediately.
 	cancel  map[string]context.CancelFunc
-	helpers map[string]map[string]struct{}
+	helpers map[string]map[string]*docker.Client
 }
 
 // NewPipeline builds a pipeline.
@@ -152,6 +160,7 @@ func NewPipeline(opts Options) *Pipeline {
 		store:              opts.Store,
 		secrets:            opts.Secrets,
 		client:             opts.Client,
+		clientFor:          opts.ClientFor,
 		dataDir:            opts.DataDir,
 		registry:           opts.Registry,
 		emitter:            opts.Emitter,
@@ -171,25 +180,48 @@ func NewPipeline(opts Options) *Pipeline {
 		imageKeep:          opts.ImageKeep,
 		buildCacheKeep:     opts.BuildCacheKeep,
 		defaultNodeVersion: opts.DefaultNodeVersion,
+		mu:                 &sync.Mutex{},
 		running:            map[string]struct{}{},
 		cancel:             map[string]context.CancelFunc{},
-		helpers:            map[string]map[string]struct{}{},
+		helpers:            map[string]map[string]*docker.Client{},
 	}
 }
 
-// registerHelper records a build helper container against its deployment.
-func (p *Pipeline) registerHelper(deploymentID, containerID string) {
-	if deploymentID == "" {
+// forNode returns a shallow pipeline view bound to one engine. Everything
+// mutable (mutex, build gate, running/cancel/helper maps) is shared, so a
+// cancellation from the base pipeline still reaches a deployment running on a
+// remote node. The returned pipeline also carries the resolver error so the
+// normal deployment error path writes it to the build log and marks the row
+// failed instead of leaving it queued forever.
+func (p *Pipeline) forNode(ctx context.Context, nodeID string) *Pipeline {
+	clone := *p
+	if p.clientFor == nil {
+		return &clone
+	}
+	client, err := p.clientFor(ctx, nodeID)
+	if err != nil {
+		clone.client = nil
+		clone.clientErr = err
+		return &clone
+	}
+	clone.client = client
+	return &clone
+}
+
+// registerHelper records a build helper container against its deployment and
+// the engine it was created on.
+func (p *Pipeline) registerHelper(deploymentID, containerID string, client *docker.Client) {
+	if deploymentID == "" || containerID == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	set := p.helpers[deploymentID]
 	if set == nil {
-		set = map[string]struct{}{}
+		set = map[string]*docker.Client{}
 		p.helpers[deploymentID] = set
 	}
-	set[containerID] = struct{}{}
+	set[containerID] = client
 }
 
 // unregisterHelper forgets a container that was already torn down.
@@ -211,16 +243,19 @@ func (p *Pipeline) unregisterHelper(deploymentID, containerID string) {
 // the hard stop behind a cancellation and a build timeout.
 func (p *Pipeline) removeHelpers(ctx context.Context, deploymentID string) {
 	p.mu.Lock()
-	ids := make([]string, 0, len(p.helpers[deploymentID]))
-	for id := range p.helpers[deploymentID] {
-		ids = append(ids, id)
+	helpers := make(map[string]*docker.Client, len(p.helpers[deploymentID]))
+	for id, client := range p.helpers[deploymentID] {
+		helpers[id] = client
 	}
 	delete(p.helpers, deploymentID)
 	p.mu.Unlock()
 
-	for _, id := range ids {
-		_ = p.client.StopContainer(ctx, id, 5*time.Second)
-		_ = p.client.RemoveContainer(ctx, id)
+	for id, client := range helpers {
+		if client == nil {
+			continue
+		}
+		_ = client.StopContainer(ctx, id, 5*time.Second)
+		_ = client.RemoveContainer(ctx, id)
 	}
 }
 
@@ -311,6 +346,10 @@ func (p *Pipeline) Run(ctx context.Context, payload Payload) error {
 	p.cancel[deployment.ID] = cancelRun
 	p.mu.Unlock()
 
+	// Bind the deployment to the application's target engine. The clone shares
+	// the parent's cancellation and helper maps, so Cancel still reaches it.
+	runPipeline := p.forNode(runCtx, app.NodeID)
+
 	// Safety net: whatever path this deployment takes, its helper containers
 	// are gone before the function returns. A fresh context is used because
 	// the run context may already be canceled.
@@ -349,7 +388,7 @@ func (p *Pipeline) Run(ctx context.Context, payload Payload) error {
 	}
 
 	started := time.Now()
-	runErr := p.execute(runCtx, writer, app, payload)
+	runErr := runPipeline.execute(runCtx, writer, app, payload)
 	elapsed := time.Since(started).Round(time.Millisecond)
 
 	// Final writes need their own deadline: the run context may already be
@@ -366,7 +405,7 @@ func (p *Pipeline) Run(ctx context.Context, payload Payload) error {
 			if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 				writer.Write([]byte("\n[x] deployment canceled after " + elapsed.String() + "\n"))
 			}
-			p.cleanupTempContainers(finalCtx, app)
+			runPipeline.cleanupTempContainers(finalCtx, app)
 			return runErr
 		}
 
@@ -380,14 +419,14 @@ func (p *Pipeline) Run(ctx context.Context, payload Payload) error {
 		p.store.Deployments.FinishDeployment(finalCtx, deployment.ID, db.DeployFailed, message)
 		p.store.Applications.PatchApplicationStatus(finalCtx, app.ID, db.StatusError)
 		p.emit(app.ID, deployment.ID, "failed", message)
-		p.cleanupTempContainers(finalCtx, app)
+		runPipeline.cleanupTempContainers(finalCtx, app)
 		return errors.New(message)
 	}
 
 	// A cancel that raced the final step must not be overwritten by success.
 	if current, _ := p.store.Deployments.DeploymentByID(finalCtx, deployment.ID); current != nil && current.Status == db.DeployCanceled {
 		writer.Write([]byte("\n[x] deployment canceled after " + elapsed.String() + "\n"))
-		p.cleanupTempContainers(finalCtx, app)
+		runPipeline.cleanupTempContainers(finalCtx, app)
 		return nil
 	}
 
@@ -419,6 +458,9 @@ func (p *Pipeline) cleanupTempContainers(ctx context.Context, app *db.Applicatio
 
 // execute builds and releases one application.
 func (p *Pipeline) execute(ctx context.Context, sink io.Writer, app *db.Application, payload Payload) error {
+	if p.clientErr != nil {
+		return fmt.Errorf("target server is unavailable: %w", p.clientErr)
+	}
 	if p.client == nil {
 		return errors.New("no docker engine configured for the target node")
 	}
@@ -476,9 +518,33 @@ func shortID(id string) string {
 	return id
 }
 
+// ContainerName is the logical container name for an application. It is built
+// from the immutable record ID, not the display name: two applications named
+// "api" (in different projects, or after a rename) must never resolve to the
+// same engine container and a rename must not leave an orphan behind.
+func ContainerName(app *db.Application) string {
+	return sanitizeName("app-" + app.ID)
+}
+
+// ContainerNameByID is the equivalent for callers holding only the record ID.
+func ContainerNameByID(id string) string {
+	return sanitizeName("app-" + id)
+}
+
+// ComposeProjectName is the isolated compose project for an application.
+func ComposeProjectName(app *db.Application) string {
+	return "meghify-app-" + sanitizeName(app.ID)
+}
+
 // NetworkName is the private network an application's container joins.
 func NetworkName(app *db.Application) string { return networkName(app) }
 
 func networkName(app *db.Application) string {
-	return "meghify-" + sanitizeName(app.Name)
+	return "meghify-net-" + sanitizeName(app.ID)
+}
+
+// routerSlug namespaces Traefik routers by application ID, so equal display
+// names cannot overwrite each other's dynamic configuration.
+func routerSlug(app *db.Application) string {
+	return "app-" + sanitizeName(app.ID)
 }

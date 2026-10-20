@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -79,7 +80,6 @@ func NewServer(opts Options) *Server {
 // Router builds the full route tree.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(s.logRequests)
 	r.Use(s.securityHeaders)
@@ -125,6 +125,7 @@ func (s *Server) Router() http.Handler {
 		s.hub.Mount(r)
 
 		r.Route("/users", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/", s.listUsers)
 			r.Post("/", s.createUser)
 			r.Put("/{id}", s.updateUser)
@@ -139,17 +140,20 @@ func (s *Server) Router() http.Handler {
 
 		r.Route("/projects", func(r chi.Router) {
 			r.Get("/", s.listProjects)
-			r.Post("/", s.createProject)
 			r.Get("/{id}", s.getProject)
-			r.Put("/{id}", s.updateProject)
-			r.Delete("/{id}", s.deleteProject)
-
 			r.Get("/{id}/environments", s.listEnvironments)
-			r.Post("/{id}/environments", s.createEnvironment)
-			r.Delete("/environments/{id}", s.deleteEnvironment)
+			r.Group(func(r chi.Router) {
+				r.Use(s.authMW.RequireAdmin)
+				r.Post("/", s.createProject)
+				r.Put("/{id}", s.updateProject)
+				r.Delete("/{id}", s.deleteProject)
+				r.Post("/{id}/environments", s.createEnvironment)
+				r.Delete("/environments/{id}", s.deleteEnvironment)
+			})
 		})
 
 		r.Route("/nodes", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/", s.listNodes)
 			r.Post("/", s.createNode)
 			r.Get("/{id}", s.getNode)
@@ -163,56 +167,70 @@ func (s *Server) Router() http.Handler {
 		})
 
 		r.Route("/ssh-keys", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/", s.listSSHKeys)
 			r.Post("/", s.createSSHKey)
 			r.Delete("/{id}", s.deleteSSHKey)
 		})
 
 		r.Route("/applications", func(r chi.Router) {
+			// Reading and operating an existing application is available to
+			// every signed-in member. Mutating infrastructure (creating an
+			// application, changing its build, domains, environment, volumes or
+			// deleting it) is an admin action until project-level ACLs exist.
 			r.Get("/", s.listApplications)
-			r.Post("/", s.createApplication)
 			r.Get("/{id}", s.getApplication)
-			r.Put("/{id}", s.updateApplication)
-			r.Delete("/{id}", s.deleteApplication)
 			r.Post("/{id}/deploy", s.deployApplication)
 			r.Post("/{id}/restart", s.restartApplication)
 			r.Post("/{id}/stop", s.stopApplication)
 			r.Get("/{id}/logs", s.applicationLogs)
-			r.Get("/{id}/terminal", s.terminalSession)
 			r.Get("/{id}/deployments", s.listDeployments)
-			r.Delete("/{id}/deployments", s.clearDeployments)
 			r.Get("/{id}/labels", s.applicationLabels)
-
 			r.Get("/{id}/domains", s.listDomains)
-			r.Post("/{id}/domains", s.createDomain)
 			r.Post("/{id}/domains/check", s.checkApplicationDomains)
 			r.Get("/{id}/suggest-domain", s.suggestDomain)
-			r.Patch("/domains/{domainID}", s.updateDomain)
 			r.Post("/domains/{domainID}/check", s.checkDomain)
-			r.Delete("/domains/{domainID}", s.deleteDomain)
-
 			r.Get("/{id}/env", s.listEnvVars)
-			r.Put("/{id}/env", s.upsertEnvVar)
-			r.Delete("/env/{envID}", s.deleteEnvVar)
-
 			r.Get("/{id}/volumes", s.listVolumes)
-			r.Post("/{id}/volumes", s.createVolume)
-			r.Delete("/volumes/{volumeID}", s.deleteVolume)
+
+			r.Group(func(r chi.Router) {
+				r.Use(s.authMW.RequireAdmin)
+				r.Post("/", s.createApplication)
+				r.Put("/{id}", s.updateApplication)
+				r.Patch("/{id}", s.updateApplication)
+				r.Delete("/{id}", s.deleteApplication)
+				r.Get("/{id}/terminal", s.terminalSession)
+				r.Delete("/{id}/deployments", s.clearDeployments)
+
+				r.Post("/{id}/domains", s.createDomain)
+				r.Patch("/domains/{domainID}", s.updateDomain)
+				r.Delete("/domains/{domainID}", s.deleteDomain)
+
+				r.Put("/{id}/env", s.upsertEnvVar)
+				r.Delete("/env/{envID}", s.deleteEnvVar)
+
+				r.Post("/{id}/volumes", s.createVolume)
+				r.Delete("/volumes/{volumeID}", s.deleteVolume)
+			})
 		})
 
 		r.Route("/databases", func(r chi.Router) {
 			r.Get("/", s.listDatabases)
-			r.Post("/", s.createDatabase)
 			r.Get("/{id}", s.getDatabase)
-			r.Delete("/{id}", s.deleteDatabase)
-			r.Post("/{id}/start", s.startDatabase)
-			r.Post("/{id}/stop", s.stopDatabase)
 			r.Get("/{id}/backups", s.listBackups)
-			r.Post("/{id}/backups", s.createBackup)
-			r.Delete("/backups/{backupID}", s.deleteBackup)
+			r.Group(func(r chi.Router) {
+				r.Use(s.authMW.RequireAdmin)
+				r.Post("/", s.createDatabase)
+				r.Delete("/{id}", s.deleteDatabase)
+				r.Post("/{id}/start", s.startDatabase)
+				r.Post("/{id}/stop", s.stopDatabase)
+				r.Post("/{id}/backups", s.createBackup)
+				r.Delete("/backups/{backupID}", s.deleteBackup)
+			})
 		})
 
 		r.Route("/services", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/", s.listServices)
 			r.Post("/", s.createService)
 			r.Get("/{id}", s.getService)
@@ -224,6 +242,7 @@ func (s *Server) Router() http.Handler {
 		// The Docker estate the panel owns on this node: a storage breakdown
 		// for the dashboard card and a manual cleanup pass.
 		r.Route("/docker", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/df", s.dockerDiskUsage)
 			r.Post("/cleanup", s.dockerCleanup)
 		})
@@ -235,6 +254,7 @@ func (s *Server) Router() http.Handler {
 		})
 
 		r.Route("/jobs", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/", s.listJobs)
 			r.Delete("/{id}", s.retryJob)
 		})
@@ -242,6 +262,7 @@ func (s *Server) Router() http.Handler {
 		// GitHub App sources: registration (manifest flow), installations and
 		// the repository lists the deployment picker reads.
 		r.Route("/github", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
 			r.Get("/apps", s.listGitHubApps)
 			r.Post("/apps", s.createGitHubApp)
 			r.Get("/apps/{id}", s.getGitHubApp)
@@ -350,16 +371,27 @@ func mapError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "resource not found")
+	case errors.Is(err, errNoEngine):
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 	case errors.Is(err, auth.ErrTOTPRequired):
-		writeError(w, http.StatusUnauthorized, "totp code required")
+		// The login form switches to its code field on the machine-readable
+		// code; a message-only response left users with 2FA stuck at the
+		// password step.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "totp code required",
+			"code":  "totp_required",
+		})
 	case errors.Is(err, auth.ErrUserExists):
 		writeError(w, http.StatusConflict, "user already exists")
 	case errors.Is(err, auth.ErrSignupDisabled):
 		writeError(w, http.StatusForbidden, "registration is disabled")
 	case errors.Is(err, auth.ErrForbidden):
 		writeError(w, http.StatusForbidden, "forbidden")
+	case errors.Is(err, auth.ErrRateLimited):
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
@@ -378,7 +410,7 @@ func (s *Server) audit(ctx context.Context, r *http.Request, action, entityType,
 		EntityType: entityType,
 		EntityID:   entityID,
 		Metadata:   string(blob),
-		IP:         clientIP(r),
+		IP:         s.clientIP(r),
 	}
 	if user != nil {
 		entry.UserID = user.ID
@@ -388,24 +420,31 @@ func (s *Server) audit(ctx context.Context, r *http.Request, action, entityType,
 	}
 }
 
-func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		if idx := indexOf(fwd, ','); idx > 0 {
-			return fwd[:idx]
+// clientIP returns the address recorded in audit logs and used for rate
+// limiting. Forwarded headers are only trusted when TRUST_PROXY is enabled:
+// otherwise any direct client could choose its own audit identity.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg != nil && s.cfg.TrustProxy {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			first, _, _ := strings.Cut(forwarded, ",")
+			if ip := validIP(strings.TrimSpace(first)); ip != "" {
+				return ip
+			}
 		}
-		return fwd
+		if ip := validIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != "" {
+			return ip
+		}
 	}
-	if real := r.Header.Get("X-Real-IP"); real != "" {
-		return real
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
 	}
-	return r.RemoteAddr
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
-func indexOf(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
+func validIP(value string) string {
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
 	}
-	return -1
+	return ""
 }

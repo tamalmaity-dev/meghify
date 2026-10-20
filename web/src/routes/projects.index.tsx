@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,8 @@ import { createFileRoute } from "@tanstack/react-router";
 
 export function ProjectsPage() {
   const queryClient = useQueryClient();
+  const { user } = useSession();
+  const isAdmin = user?.role === "admin";
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -42,10 +45,12 @@ export function ProjectsPage() {
         title="Projects"
         description="Group environments, applications and databases by product."
         actions={
-          <Button variant="primary" onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" />
-            New project
-          </Button>
+          isAdmin ? (
+            <Button variant="primary" onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New project
+            </Button>
+          ) : undefined
         }
       />
 
@@ -53,11 +58,17 @@ export function ProjectsPage() {
         <Card>
           <EmptyState
             title="No projects yet"
-            description="A project holds one or more environments. Create one, then add an application or a database."
+            description={
+              isAdmin
+                ? "A project holds one or more environments. Create one, then add an application or a database."
+                : "No projects are available yet. An administrator can create one."
+            }
             action={
-              <Button variant="primary" onClick={() => setOpen(true)}>
-                Create your first project
-              </Button>
+              isAdmin ? (
+                <Button variant="primary" onClick={() => setOpen(true)}>
+                  Create your first project
+                </Button>
+              ) : undefined
             }
           />
         </Card>

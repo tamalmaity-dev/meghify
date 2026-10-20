@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/deploy"
 )
 
 // deployRequest starts a deployment for an application.
@@ -92,10 +95,14 @@ func (s *Server) queueDeployment(
 		NoCache:       noCache,
 	})
 	if err != nil {
+		_ = s.store.Deployments.FinishDeployment(ctx, deployment.ID, db.DeployFailed, err.Error())
 		return nil, err
 	}
 
 	if _, err := s.store.Jobs.Enqueue(ctx, db.JobDeploy, string(payload), time.Now(), 1); err != nil {
+		// A queued row whose job never entered the queue would block every
+		// later deployment as "already running". Fail it visibly instead.
+		_ = s.store.Deployments.FinishDeployment(ctx, deployment.ID, db.DeployFailed, err.Error())
 		return nil, err
 	}
 	return deployment, nil
@@ -131,12 +138,13 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		mapError(w, err)
 		return
 	}
-	if s.docker == nil {
-		writeError(w, http.StatusServiceUnavailable, "no docker engine configured")
+	client, err := s.clientForNode(r.Context(), app.NodeID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 
-	container, err := s.docker.ContainerByName(r.Context(), app.Name)
+	container, err := client.ContainerByName(r.Context(), deploy.ContainerName(app))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -151,10 +159,10 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 	timeout := 20 * time.Second
 	switch action {
 	case "restart":
-		err = s.docker.RestartContainer(r.Context(), container.ID, timeout)
+		err = client.RestartContainer(r.Context(), container.ID, timeout)
 		app.Status = db.StatusRunning
 	default:
-		err = s.docker.StopContainer(r.Context(), container.ID, timeout)
+		err = client.StopContainer(r.Context(), container.ID, timeout)
 		app.Status = db.StatusStopped
 	}
 	if err != nil {
@@ -180,12 +188,13 @@ func (s *Server) applicationLogs(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	if s.docker == nil {
-		writeError(w, http.StatusServiceUnavailable, "no docker engine configured")
+	client, err := s.clientForNode(r.Context(), app.NodeID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 
-	container, err := s.docker.ContainerByName(r.Context(), app.Name)
+	container, err := client.ContainerByName(r.Context(), deploy.ContainerName(app))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -200,7 +209,7 @@ func (s *Server) applicationLogs(w http.ResponseWriter, r *http.Request) {
 		tail = "500"
 	}
 	follow := r.URL.Query().Get("follow") == "1"
-	reader, err := s.docker.ContainerLogs(r.Context(), container.ID, tail, follow)
+	reader, err := client.ContainerLogs(r.Context(), container.ID, tail, follow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -290,8 +299,8 @@ func (s *Server) cancelDeployment(w http.ResponseWriter, r *http.Request) {
 	// serving traffic while the canceled deployment is gone.
 	if app, err := s.store.Applications.ApplicationByID(r.Context(), deployment.ApplicationID); err == nil {
 		status := db.StatusError
-		if s.docker != nil {
-			if container, err := s.docker.ContainerByName(r.Context(), app.Name); err == nil && container != nil {
+		if client, err := s.clientForNode(r.Context(), app.NodeID); err == nil {
+			if container, err := client.ContainerByName(r.Context(), deploy.ContainerName(app)); err == nil && container != nil {
 				status = db.StatusStopped
 				if container.State == "running" {
 					status = db.StatusRunning
@@ -313,6 +322,14 @@ func (s *Server) cancelDeployment(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) clearDeployments(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if paths, err := s.store.Deployments.LogPathsForApplication(r.Context(), id); err == nil {
+		logRoot := filepath.Join(s.cfg.DataDir, "deployments")
+		for _, path := range paths {
+			if safePathUnder(logRoot, path) {
+				_ = os.Remove(path)
+			}
+		}
+	}
 	if err := s.store.Deployments.DeleteDeploymentsForApplication(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

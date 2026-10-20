@@ -9,6 +9,7 @@ import {
   Server,
 } from "lucide-react";
 import { api, formatBytes } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { SystemMetrics } from "@/components/system-metrics";
 import { DockerDiskUsage } from "@/components/docker-disk";
@@ -22,12 +23,18 @@ import type { Application, Node, Project, Stats } from "@/lib/types";
  * the collections that actually need attention.
  */
 export function DashboardPage() {
+  const { user } = useSession();
+  const isAdmin = user?.role === "admin";
   const stats = useQuery({ queryKey: ["stats"], queryFn: () => api.get<Stats>("/stats") });
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get<Project[]>("/projects"),
   });
-  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => api.get<Node[]>("/nodes") });
+  const nodes = useQuery({
+    queryKey: ["nodes"],
+    queryFn: () => api.get<Node[]>("/nodes"),
+    enabled: isAdmin,
+  });
   const apps = useQuery({
     queryKey: ["applications"],
     queryFn: () => api.get<Application[]>("/applications"),
@@ -55,9 +62,12 @@ export function DashboardPage() {
         }
       />
 
-      <SystemMetrics />
-
-      <DockerDiskUsage />
+      {isAdmin && (
+        <>
+          <SystemMetrics />
+          <DockerDiskUsage />
+        </>
+      )}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile

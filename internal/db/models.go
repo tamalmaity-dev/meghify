@@ -141,25 +141,28 @@ type SSHKey struct {
 // Node is a server the panel controls through the Docker Engine API. The
 // singleton "local" row describes the machine the panel itself runs on.
 type Node struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	Address       string     `json:"address"`
-	SSHPort       int        `json:"sshPort"`
-	SSHUser       string     `json:"sshUser"`
-	SSHKeyID      string     `json:"sshKeyId,omitempty"`
-	Status        string     `json:"status"`
-	OS            string     `json:"os"`
-	Kernel        string     `json:"kernel"`
-	Arch          string     `json:"arch"`
-	CPUs          int        `json:"cpus"`
-	MemoryBytes   int64      `json:"memoryBytes"`
-	DockerVersion string     `json:"dockerVersion"`
-	BootTime      *time.Time `json:"bootTime,omitempty"`
-	LastSeenAt    *time.Time `json:"lastSeenAt"`
-	ErrorMessage  string     `json:"errorMessage,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Address     string `json:"address"`
+	SSHPort     int    `json:"sshPort"`
+	SSHUser     string `json:"sshUser"`
+	SSHKeyID    string `json:"sshKeyId,omitempty"`
+	// HostKeyFingerprint is the pinned SHA256 SSH host key. Empty means TOFU:
+	// the next connection records it. Changing the address clears it.
+	HostKeyFingerprint string     `json:"hostKeyFingerprint,omitempty"`
+	Status             string     `json:"status"`
+	OS                 string     `json:"os"`
+	Kernel             string     `json:"kernel"`
+	Arch               string     `json:"arch"`
+	CPUs               int        `json:"cpus"`
+	MemoryBytes        int64      `json:"memoryBytes"`
+	DockerVersion      string     `json:"dockerVersion"`
+	BootTime           *time.Time `json:"bootTime,omitempty"`
+	LastSeenAt         *time.Time `json:"lastSeenAt"`
+	ErrorMessage       string     `json:"errorMessage,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 // NodeMetrics is a resource sample.
@@ -316,11 +319,13 @@ type Domain struct {
 
 // Volume binds persistent storage to a resource.
 type Volume struct {
-	ID        string    `json:"id"`
-	Target    string    `json:"target"`
-	TargetID  string    `json:"targetId"`
-	Name      string    `json:"name"`
-	HostPath  string    `json:"hostPath"`
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	TargetID string `json:"targetId"`
+	Name     string `json:"name"`
+	// HostPath is the engine-side named volume (meghify-vol-<id>). It is an
+	// implementation detail and never exposed or accepted over the API.
+	HostPath  string    `json:"-"`
 	MountPath string    `json:"mountPath"`
 	ReadOnly  bool      `json:"readOnly"`
 	CreatedAt time.Time `json:"createdAt"`

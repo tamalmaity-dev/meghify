@@ -140,12 +140,32 @@ func (r *JobRepo) Fail(ctx context.Context, id, errMsg string) error {
 	return err
 }
 
-// Requeue moves a job back to pending immediately. Used when a worker dies.
+// Requeue moves a finished job back to pending. It deliberately refuses to
+// touch a running job: a second worker claiming it would execute the same work
+// twice. Use RequeueRunning only during startup recovery.
 func (r *JobRepo) Requeue(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE jobs SET status = ?, locked_at = NULL, run_at = ? WHERE id = ?`,
-		JobPending, Text(time.Now().UTC()), id)
-	return err
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status = ?, locked_at = NULL, run_at = ?, finished_at = NULL
+		  WHERE id = ? AND status IN (?, ?)`,
+		JobPending, Text(time.Now().UTC()), id, JobFailed, JobDone)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
+// RequeueRunning is the crash-recovery pass: jobs left running by a process
+// that stopped before completing them become pending again. It is called before
+// workers start, never while another instance is live.
+func (r *JobRepo) RequeueRunning(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE jobs SET status = ?, locked_at = NULL, run_at = ?, finished_at = NULL
+		  WHERE status = ?`,
+		JobPending, Text(time.Now().UTC()), JobRunning)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // JobByID loads a job.

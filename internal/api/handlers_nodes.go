@@ -16,11 +16,25 @@ import (
 )
 
 type nodeRequest struct {
-	Name     string `json:"name"`
-	Address  string `json:"address"`
-	SSHPort  int    `json:"sshPort"`
-	SSHUser  string `json:"sshUser"`
-	SSHKeyID string `json:"sshKeyId"`
+	Name               string `json:"name"`
+	Address            string `json:"address"`
+	SSHPort            int    `json:"sshPort"`
+	SSHUser            string `json:"sshUser"`
+	SSHKeyID           string `json:"sshKeyId"`
+	HostKeyFingerprint string `json:"hostKeyFingerprint"`
+}
+
+// validateHostKey accepts the OpenSSH SHA256 fingerprint format. Leaving it
+// empty is allowed: the first successful connection pins it (TOFU).
+func validateHostKey(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(value, "SHA256:") || len(value) < 12 || len(value) > 128 {
+		return "", errors.New("host key fingerprint must look like SHA256:... (run ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server)")
+	}
+	return value, nil
 }
 
 func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -64,15 +78,21 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request) {
 	if user == "" {
 		user = "root"
 	}
+	fingerprint, err := validateHostKey(req.HostKeyFingerprint)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	n := &db.Node{
-		ID:       db.NewID(),
-		Name:     strings.TrimSpace(req.Name),
-		Address:  strings.TrimSpace(req.Address),
-		SSHPort:  port,
-		SSHUser:  user,
-		SSHKeyID: req.SSHKeyID,
-		Status:   db.NodePending,
+		ID:                 db.NewID(),
+		Name:               strings.TrimSpace(req.Name),
+		Address:            strings.TrimSpace(req.Address),
+		SSHPort:            port,
+		SSHUser:            user,
+		SSHKeyID:           req.SSHKeyID,
+		HostKeyFingerprint: fingerprint,
+		Status:             db.NodePending,
 	}
 	if err := s.store.Nodes.CreateNode(r.Context(), n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -91,6 +111,23 @@ func (s *Server) deleteNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "the server running the panel cannot be removed")
 		return
 	}
+	// Never orphan workloads: a removed node cannot deploy, route, stop or
+	// remove the containers that still reference it.
+	var resources int
+	if err := s.store.Handle().QueryRowContext(r.Context(),
+		`SELECT
+		   (SELECT COUNT(*) FROM applications WHERE node_id = ?) +
+		   (SELECT COUNT(*) FROM services WHERE node_id = ?) +
+		   (SELECT COUNT(*) FROM databases WHERE node_id = ?)`,
+		id, id, id).Scan(&resources); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if resources > 0 {
+		writeError(w, http.StatusConflict,
+			"this server still hosts applications, services or databases; move or delete them first")
+		return
+	}
 	if s.nodes != nil {
 		s.nodes.Forget(id)
 	}
@@ -103,11 +140,12 @@ func (s *Server) deleteNode(w http.ResponseWriter, r *http.Request) {
 }
 
 type nodeUpdateRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Address     string `json:"address"`
-	SSHPort     int    `json:"sshPort"`
-	SSHUser     string `json:"sshUser"`
+	Name               string `json:"name"`
+	Description        string `json:"description"`
+	Address            string `json:"address"`
+	SSHPort            int    `json:"sshPort"`
+	SSHUser            string `json:"sshUser"`
+	HostKeyFingerprint string `json:"hostKeyFingerprint"`
 }
 
 // updateNode applies the Connection card edits. The locally managed server
@@ -147,13 +185,35 @@ func (s *Server) updateNode(w http.ResponseWriter, r *http.Request) {
 		if user == "" {
 			user = "root"
 		}
-		changed := n.Address != strings.TrimSpace(req.Address) ||
+		addressChanged := n.Address != strings.TrimSpace(req.Address) ||
 			n.SSHPort != port || n.SSHUser != user
+		changed := addressChanged
+		oldFingerprint := n.HostKeyFingerprint
 		n.Address = strings.TrimSpace(req.Address)
 		n.SSHPort = port
 		n.SSHUser = user
+		if provided := strings.TrimSpace(req.HostKeyFingerprint); provided != "" {
+			fingerprint, err := validateHostKey(provided)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if addressChanged && fingerprint == oldFingerprint {
+				// The UI submitted the old pin alongside a new address. A
+				// different host must prove itself again; the first connection
+				// records the new key.
+				n.HostKeyFingerprint = ""
+			} else {
+				if fingerprint != oldFingerprint {
+					changed = true
+				}
+				n.HostKeyFingerprint = fingerprint
+			}
+		} else if addressChanged {
+			n.HostKeyFingerprint = ""
+		}
 		if changed && s.nodes != nil {
-			// The cached tunnel points at the old address.
+			// The cached tunnel points at the old address or host key.
 			s.nodes.Forget(n.ID)
 		}
 	}
@@ -285,7 +345,7 @@ func (s *Server) provisionAsync(n *db.Node) {
 	collect := func(line string) {
 		progress = append(progress, line)
 		if s.hub != nil {
-			s.hub.BroadcastApplication("node:"+n.ID, map[string]any{
+			s.hub.BroadcastNode(n.ID, map[string]any{
 				"nodeId": n.ID,
 				"event":  "provision",
 				"line":   line,
@@ -308,7 +368,7 @@ func (s *Server) provisionAsync(n *db.Node) {
 
 	s.store.Nodes.UpdateNodeStatus(ctx, n.ID, db.NodeOnline, "", time.Now().UTC())
 	if s.hub != nil {
-		s.hub.BroadcastApplication("node:"+n.ID, map[string]any{"nodeId": n.ID, "event": "online"})
+		s.hub.BroadcastNode(n.ID, map[string]any{"nodeId": n.ID, "event": "online"})
 	}
 }
 

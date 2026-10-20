@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { api } from "@/lib/api";
+import { displayHost } from "@/lib/utils";
 import { PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -131,7 +132,7 @@ export function SourceDetailPage() {
         title={source.name}
         description={
           source.configured
-            ? `GitHub App ${source.appId} · ${base.replace("https://", "")}/apps/${source.slug}`
+            ? `GitHub App ${source.appId} · ${displayHost(base)}/apps/${source.slug}`
             : "Setup incomplete — confirm the app on GitHub to finish connecting it."
         }
         actions={

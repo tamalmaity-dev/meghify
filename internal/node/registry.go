@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func (r *Registry) connect(ctx context.Context, n *db.Node) (*docker.Client, err
 		return nil, err
 	}
 
-	dialer, err := NewDialer(n.Address, n.SSHPort, n.SSHUser, key)
+	dialer, err := r.dialerFor(ctx, n, key)
 	if err != nil {
 		return nil, err
 	}
@@ -124,8 +125,34 @@ func (r *Registry) sshKey(ctx context.Context, n *db.Node) (string, error) {
 	return private, nil
 }
 
+// dialerFor builds a dialer with host-key pinning. On first use the registry
+// records the observed SHA256 fingerprint through hostKeySink; after that a
+// different key aborts the handshake.
+func (r *Registry) dialerFor(ctx context.Context, n *db.Node, privateKey string) (*Dialer, error) {
+	return NewDialer(n.Address, n.SSHPort, n.SSHUser, privateKey, n.HostKeyFingerprint,
+		func(callbackCtx context.Context, fingerprint string) error {
+			if hostKeySink == nil {
+				// Accepting a first-use key without persisting it would silently
+				// disable pinning for every later connection.
+				return errors.New("ssh host-key persistence is not configured")
+			}
+			writeCtx, cancel := context.WithTimeout(callbackCtx, 10*time.Second)
+			defer cancel()
+			return hostKeySink(writeCtx, n.ID, fingerprint)
+		})
+}
+
 // keySource resolves the encrypted private key for a stored ssh key id.
 type keySourceFunc func(ctx context.Context, id string) (string, error)
+
+// hostKeySink persists a first-use host key fingerprint.
+type hostKeySinkFunc func(ctx context.Context, nodeID, fingerprint string) error
+
+var hostKeySink hostKeySinkFunc
+
+// SetHostKeySink wires the database write used by trust-on-first-use. It is set
+// once at startup, before any node connection is opened.
+func SetHostKeySink(fn hostKeySinkFunc) { hostKeySink = fn }
 
 // keySource is populated by the API layer at startup so the registry can look
 // up key material without depending on the database package directly.
@@ -144,7 +171,7 @@ func (r *Registry) Install(ctx context.Context, n *db.Node, sink func(string)) e
 		return err
 	}
 
-	dialer, err := NewDialer(n.Address, n.SSHPort, n.SSHUser, key)
+	dialer, err := r.dialerFor(ctx, n, key)
 	if err != nil {
 		return err
 	}
@@ -179,7 +206,7 @@ func (r *Registry) Dialer(ctx context.Context, n *db.Node) (*Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
-	dialer, err := NewDialer(n.Address, n.SSHPort, n.SSHUser, key)
+	dialer, err := r.dialerFor(ctx, n, key)
 	if err != nil {
 		return nil, err
 	}

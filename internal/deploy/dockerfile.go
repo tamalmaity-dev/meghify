@@ -118,9 +118,9 @@ func (p *Pipeline) buildDockerfileInHelper(ctx context.Context, sink io.Writer, 
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	dockerfile := strings.TrimPrefix(strings.TrimSpace(app.Dockerfile), "/")
-	if dockerfile == "" {
-		dockerfile = "Dockerfile"
+	dockerfile, err := CleanRelativePath(app.Dockerfile, false)
+	if err != nil {
+		return fmt.Errorf("dockerfile path: %w", err)
 	}
 
 	buildArgs, err := p.buildArgs(ctx, app)
@@ -187,9 +187,13 @@ func (p *Pipeline) buildDockerfileOnHost(ctx context.Context, sink io.Writer, ap
 	if err != nil {
 		return err
 	}
+	dockerfile, err := CleanRelativePath(app.Dockerfile, false)
+	if err != nil {
+		return fmt.Errorf("dockerfile path: %w", err)
+	}
 	if _, err := p.client.Build(ctx, docker.BuildRequest{
 		ContextDir: workspace,
-		Dockerfile: filepath.Join(app.BaseDirectory, app.Dockerfile),
+		Dockerfile: dockerfile,
 		Tags:       []string{imageRef},
 		BuildArgs:  buildArgs,
 		Labels: map[string]string{
@@ -437,7 +441,7 @@ func (p *Pipeline) composeInHelper(ctx context.Context, sink io.Writer, app *db.
 	if err := build.writeFile(ctx, "/workspace/compose.yaml", app.Dockerfile); err != nil {
 		return err
 	}
-	command := "cd /workspace && docker compose -p " + shellQuote(sanitizeName(app.Name)) +
+	command := "cd /workspace && docker compose -p " + shellQuote(ComposeProjectName(app)) +
 		" -f /workspace/compose.yaml up -d --remove-orphans"
 	if err := build.run(ctx, "sh", "-c", command); err != nil {
 		return fmt.Errorf("compose up: %w", err)
@@ -457,7 +461,7 @@ func (p *Pipeline) composeOnHost(ctx context.Context, sink io.Writer, app *db.Ap
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", sanitizeName(app.Name), "-f", composePath, "up", "-d", "--remove-orphans")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", ComposeProjectName(app), "-f", composePath, "up", "-d", "--remove-orphans")
 	cmd.Dir = workspace
 	cmd.Stdout = sink
 	cmd.Stderr = sink
@@ -525,7 +529,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 
 	// Find the live container once; the replacement is created under a
 	// temporary name, so this lookup only ever sees the previous one.
-	previous, err := p.client.ContainerByName(ctx, app.Name)
+	previous, err := p.client.ContainerByName(ctx, ContainerName(app))
 	if err != nil {
 		sink.Write([]byte("[!] could not inspect previous container: " + err.Error() + "\n"))
 		previous = nil
@@ -549,7 +553,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 		}
 	}
 	containerID, err := p.client.CreateContainer(ctx, &docker.ContainerSpec{
-		Name:  fmt.Sprintf("%s-%d", app.Name, time.Now().Unix()),
+		Name:  fmt.Sprintf("%s-%d", ContainerName(app), time.Now().Unix()),
 		Image: imageRef,
 		Env:   runtimeEnv,
 		// Routing metadata only: routers come from the proxy's dynamic
@@ -616,7 +620,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 
 	// Only one container may carry the application's name; the new one takes
 	// it after the old one is gone.
-	if err := p.client.RenameContainer(ctx, containerID, app.Name); err != nil {
+	if err := p.client.RenameContainer(ctx, containerID, ContainerName(app)); err != nil {
 		sink.Write([]byte("[!] could not rename container: " + err.Error() + "\n"))
 	}
 
@@ -826,16 +830,12 @@ func (p *Pipeline) waitHealthy(ctx context.Context, containerID string, timeout 
 // returns the directory that the build context should be sent from.
 func (p *Pipeline) prepareWorkspace(ctx context.Context, sink io.Writer, app *db.Application) (string, error) {
 	root := filepath.Join(p.dataDir, "workspaces", app.ID)
-	workdir := filepath.Join(root, "source")
-
-	baseDir := strings.TrimSpace(app.BaseDirectory)
-	if baseDir == "" || baseDir == "/" {
-		baseDir = ""
-	} else {
-		baseDir = strings.Trim(baseDir, "/")
-	}
-	if baseDir != "" {
-		workdir = filepath.Join(workdir, baseDir)
+	// JoinRelative rejects absolute paths, drive letters and ".." components a
+	// second time even though the API validates them: this value reaches
+	// os.RemoveAll and must never be trusted just because it came from a row.
+	workdir, err := JoinRelative(filepath.Join(root, "source"), app.BaseDirectory)
+	if err != nil {
+		return "", fmt.Errorf("base directory: %w", err)
 	}
 
 	if app.GitRepository == "" {
@@ -958,8 +958,8 @@ func (p *Pipeline) cloneURL(app *db.Application) (clone, secret string, err erro
 // builderContextDir is where the build runs inside the helper: the repository
 // root, or the configured base directory inside it.
 func builderContextDir(app *db.Application) string {
-	base := strings.Trim(strings.TrimSpace(app.BaseDirectory), "/")
-	if base == "" {
+	base, err := CleanRelativePath(app.BaseDirectory, true)
+	if err != nil || base == "" {
 		return "/workspace/src"
 	}
 	return "/workspace/src/" + base
@@ -988,7 +988,10 @@ func (p *Pipeline) imageReference(app *db.Application) string {
 	if registry == "" {
 		registry = "meghify.local"
 	}
-	short := app.ID[:8]
+	short := shortID(app.ID)
+	if len(short) > 8 {
+		short = short[:8]
+	}
 	return fmt.Sprintf("%s/%s:%s-%d", registry, sanitizeName(app.Name), short, time.Now().Unix())
 }
 
@@ -1045,13 +1048,23 @@ func (p *Pipeline) envList(ctx context.Context, targetID string, buildOnly bool)
 	return out, nil
 }
 
-// toMounts converts stored volume bindings into docker mounts.
+// toMounts converts stored volume records into named Docker volumes. Named
+// volumes work identically on local and remote engines; bind-mounting a host
+// path supplied by a panel user allowed them to mount (and later ask the panel
+// to delete) arbitrary paths on the Docker host.
 func toMounts(volumes []*db.Volume) []docker.Mount {
 	out := make([]docker.Mount, 0, len(volumes))
 	for _, v := range volumes {
-		out = append(out, docker.Mount{Source: v.HostPath, Target: v.MountPath, ReadOnly: v.ReadOnly})
+		out = append(out, docker.Mount{Source: VolumeName(v.ID), Target: v.MountPath, ReadOnly: v.ReadOnly})
 	}
 	return out
+}
+
+// VolumeName is the stable engine-side name for a volume record. Deriving it
+// from the record ID rather than the display name prevents collisions and keeps
+// it stable across renames.
+func VolumeName(volumeID string) string {
+	return "meghify-vol-" + strings.ToLower(strings.TrimSpace(volumeID))
 }
 
 // domainPath normalises the router's path prefix.
@@ -1070,8 +1083,9 @@ func healthCheckFor(app *db.Application) *container.HealthConfig {
 	if app.HealthCheck == "" {
 		return nil
 	}
+	target := "http://127.0.0.1:" + fmt.Sprint(app.Port) + app.HealthCheck
 	return &container.HealthConfig{
-		Test:        []string{"CMD-SHELL", "curl -fsS http://127.0.0.1:" + fmt.Sprint(app.Port) + app.HealthCheck + " || exit 1"},
+		Test:        []string{"CMD-SHELL", "curl -fsS " + shellQuote(target) + " || exit 1"},
 		Interval:    15 * time.Second,
 		Timeout:     5 * time.Second,
 		Retries:     3,

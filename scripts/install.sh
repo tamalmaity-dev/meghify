@@ -763,6 +763,23 @@ else
   say ".env already exists — keeping your configuration"
 fi
 
+# Compose joins the host docker socket group so the distroless nonroot user can
+# reach the engine. Add or repair it on installs created before this setting.
+if [[ "$RUN_MODE" == "compose" ]]; then
+  CURRENT_DOCKER_GID="$(grep '^DOCKER_GID=' "$PANEL_DIR/.env" | head -n1 | cut -d= -f2- || true)"
+  if [[ -z "$CURRENT_DOCKER_GID" ]]; then
+    DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || true)"
+    if [[ -z "$DOCKER_GID" ]]; then
+      die "could not read the docker socket group from /var/run/docker.sock"
+    fi
+    if grep -q '^DOCKER_GID=' "$PANEL_DIR/.env"; then
+      sed -i "s|^DOCKER_GID=.*|DOCKER_GID=$DOCKER_GID|" "$PANEL_DIR/.env"
+    else
+      printf 'DOCKER_GID=%s\n' "$DOCKER_GID" >> "$PANEL_DIR/.env"
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # start the panel and wait for the API
 # ---------------------------------------------------------------------------

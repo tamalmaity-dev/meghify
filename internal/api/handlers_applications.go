@@ -2,12 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +103,27 @@ func parsePortMappings(raw string) (map[int]int, error) {
 	return mappings, nil
 }
 
+// cleanHealthCheck accepts an optional URL path used by the container health
+// probe. The probe is built as a shell command, so shell metacharacters are
+// rejected rather than escaped twice; the default is empty (no probe).
+func cleanHealthCheck(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 512 || !strings.HasPrefix(value, "/") {
+		return "", errValidation("health check must be an absolute URL path such as /health")
+	}
+	for _, r := range value {
+		allowed := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			strings.ContainsRune("/._~%?=&+-", r)
+		if !allowed {
+			return "", errValidation("health check contains unsupported characters")
+		}
+	}
+	return value, nil
+}
+
 func errValidation(message string) error { return &validationError{message} }
 
 type validationError struct{ message string }
@@ -143,6 +163,30 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
+	if err := s.validateNodeSelection(r.Context(), req.NodeID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	buildPack := valueOr(req.BuildPack, db.BuildDockerfile)
+	baseDirectory, err := deploy.CleanRelativePath(valueOr(req.BaseDirectory, "/"), true)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "baseDirectory: "+err.Error())
+		return
+	}
+	dockerfile := req.Dockerfile
+	if buildPack == db.BuildDockerfile {
+		dockerfile, err = deploy.CleanRelativePath(valueOr(req.Dockerfile, "Dockerfile"), false)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "dockerfile: "+err.Error())
+			return
+		}
+	}
+	healthCheck, err := cleanHealthCheck(req.HealthCheck)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	app := &db.Application{
 		ID:                db.NewID(),
@@ -151,12 +195,12 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 		Description:       req.Description,
 		GitRepository:     req.GitRepository,
 		GitBranch:         valueOr(req.GitBranch, "main"),
-		BuildPack:         valueOr(req.BuildPack, db.BuildDockerfile),
-		Dockerfile:        valueOr(req.Dockerfile, "Dockerfile"),
-		BaseDirectory:     valueOr(req.BaseDirectory, "/"),
+		BuildPack:         buildPack,
+		Dockerfile:        dockerfile,
+		BaseDirectory:     baseDirectory,
 		Port:              valueOr(req.Port, 3000),
-		HealthCheck:       req.HealthCheck,
-		NodeID:            req.NodeID,
+		HealthCheck:       healthCheck,
+		NodeID:            strings.TrimSpace(req.NodeID),
 		FQDN:              strings.ToLower(strings.TrimSpace(req.FQDN)),
 		Status:            db.StatusIdle,
 		PortMappings:      strings.TrimSpace(req.PortMappings),
@@ -239,6 +283,30 @@ func (s *Server) getApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app)
 }
 
+// applicationPatchRequest uses pointers so an omitted JSON field means "keep
+// the stored value". The old full-record PUT let one card (for example the
+// GitHub auto-deploy switch) overwrite every unrelated column with a zero
+// value. PUT and PATCH share this handler; both are now partial-safe.
+type applicationPatchRequest struct {
+	Name              *string  `json:"name"`
+	Description       *string  `json:"description"`
+	GitRepository     *string  `json:"gitRepository"`
+	GitBranch         *string  `json:"gitBranch"`
+	BuildPack         *string  `json:"buildPack"`
+	Dockerfile        *string  `json:"dockerfile"`
+	BaseDirectory     *string  `json:"baseDirectory"`
+	Port              *int     `json:"port"`
+	HealthCheck       *string  `json:"healthCheck"`
+	NodeID            *string  `json:"nodeId"`
+	PortMappings      *string  `json:"portMappings"`
+	RedirectHTTPS     *bool    `json:"redirectHttps"`
+	CPULimit          *float64 `json:"cpuLimit"`
+	MemoryLimit       *int64   `json:"memoryLimit"`
+	PreDeployCommand  *string  `json:"preDeployCommand"`
+	PostDeployCommand *string  `json:"postDeployCommand"`
+	AutoDeploy        *bool    `json:"autoDeploy"`
+}
+
 func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	existing, err := s.store.Applications.ApplicationByID(r.Context(), id)
@@ -247,31 +315,122 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req applicationRequest
+	var req applicationPatchRequest
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := req.validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 
-	existing.Name = strings.TrimSpace(req.Name)
-	existing.Description = req.Description
-	existing.GitRepository = req.GitRepository
-	existing.GitBranch = valueOr(req.GitBranch, existing.GitBranch)
-	existing.BuildPack = valueOr(req.BuildPack, existing.BuildPack)
-	existing.Dockerfile = valueOr(req.Dockerfile, existing.Dockerfile)
-	existing.BaseDirectory = valueOr(req.BaseDirectory, existing.BaseDirectory)
-	existing.Port = valueOr(req.Port, existing.Port)
-	existing.HealthCheck = req.HealthCheck
-	existing.NodeID = req.NodeID
-	existing.PortMappings = strings.TrimSpace(req.PortMappings)
-	existing.CPULimit = req.CPULimit
-	existing.MemoryLimit = req.MemoryLimit
-	existing.PreDeployCommand = strings.TrimSpace(req.PreDeployCommand)
-	existing.PostDeployCommand = strings.TrimSpace(req.PostDeployCommand)
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "application name is required")
+			return
+		}
+		if len(name) > 100 {
+			writeError(w, http.StatusBadRequest, "application name is too long")
+			return
+		}
+		existing.Name = name
+	}
+	if req.Description != nil {
+		existing.Description = *req.Description
+	}
+	if req.GitRepository != nil {
+		existing.GitRepository = strings.TrimSpace(*req.GitRepository)
+	}
+	if req.GitBranch != nil && strings.TrimSpace(*req.GitBranch) != "" {
+		existing.GitBranch = strings.TrimSpace(*req.GitBranch)
+	}
+	if req.BuildPack != nil {
+		pack := strings.TrimSpace(*req.BuildPack)
+		switch pack {
+		case db.BuildDockerfile, db.BuildCompose, db.BuildNixpacks, db.BuildRailpack, db.BuildImage:
+			existing.BuildPack = pack
+		default:
+			writeError(w, http.StatusBadRequest, "unsupported build pack")
+			return
+		}
+	}
+	if req.Dockerfile != nil {
+		existing.Dockerfile = strings.TrimSpace(*req.Dockerfile)
+	}
+	if req.BaseDirectory != nil {
+		base, err := deploy.CleanRelativePath(*req.BaseDirectory, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "baseDirectory: "+err.Error())
+			return
+		}
+		existing.BaseDirectory = base
+	}
+	if existing.BuildPack == db.BuildDockerfile {
+		dockerfile, err := deploy.CleanRelativePath(existing.Dockerfile, false)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "dockerfile: "+err.Error())
+			return
+		}
+		existing.Dockerfile = dockerfile
+	}
+	if req.Port != nil {
+		if *req.Port < 0 || *req.Port > 65535 {
+			writeError(w, http.StatusBadRequest, "port must be between 0 and 65535")
+			return
+		}
+		existing.Port = *req.Port
+	}
+	if req.HealthCheck != nil {
+		health, err := cleanHealthCheck(*req.HealthCheck)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		existing.HealthCheck = health
+	}
+	if req.NodeID != nil {
+		current := existing.NodeID
+		if current == "" {
+			current = "local"
+		}
+		next := strings.TrimSpace(*req.NodeID)
+		if next == "" {
+			next = "local"
+		}
+		if next != current {
+			// Moving a resource between engines requires stopping it on the
+			// old node and recreating its networks/volumes. Node selection is
+			// therefore fixed at creation time rather than half-implemented.
+			writeError(w, http.StatusBadRequest, "a server cannot be changed after creation; create a new application on the target server")
+			return
+		}
+	}
+	if req.PortMappings != nil {
+		mappings := strings.TrimSpace(*req.PortMappings)
+		if _, err := parsePortMappings(mappings); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		existing.PortMappings = mappings
+	}
+	if req.CPULimit != nil {
+		if *req.CPULimit < 0 {
+			writeError(w, http.StatusBadRequest, "cpu limit cannot be negative")
+			return
+		}
+		existing.CPULimit = *req.CPULimit
+	}
+	if req.MemoryLimit != nil {
+		if *req.MemoryLimit < 0 {
+			writeError(w, http.StatusBadRequest, "memory limit cannot be negative")
+			return
+		}
+		existing.MemoryLimit = *req.MemoryLimit
+	}
+	if req.PreDeployCommand != nil {
+		existing.PreDeployCommand = strings.TrimSpace(*req.PreDeployCommand)
+	}
+	if req.PostDeployCommand != nil {
+		existing.PostDeployCommand = strings.TrimSpace(*req.PostDeployCommand)
+	}
 	// The Domains card's "Redirect HTTP to HTTPS" switch is the default for
 	// the application's domains, so changing it applies to the existing ones.
 	if req.RedirectHTTPS != nil && *req.RedirectHTTPS != existing.RedirectHTTPS {
@@ -293,6 +452,7 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
+	s.syncRoutes(r.Context(), id)
 	s.audit(r.Context(), r, "application.update", "application", id, nil)
 	writeJSON(w, http.StatusOK, existing)
 }
@@ -308,101 +468,28 @@ func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-
-	cleanVolumes := r.URL.Query().Get("volumes") == "1"
-	cleanNetworks := r.URL.Query().Get("networks") == "1"
-	cleanConfig := r.URL.Query().Get("config") == "1"
-	runDockerCleanup := r.URL.Query().Get("cleanup") == "1"
-
-	result := map[string]any{
-		"volumesRemoved": 0,
-		"networkRemoved": false,
-		"configRemoved":  false,
-		"spaceReclaimed": int64(0),
+	// A live deployment can create a new container after teardown has already
+	// removed the old one. Require the operator to cancel it first.
+	if latest, err := s.store.Deployments.LatestDeployment(r.Context(), id); err == nil && latest != nil && isInFlight(latest.Status) {
+		writeError(w, http.StatusConflict, "cancel the running deployment before deleting this application")
+		return
 	}
 
-	// The container goes first so its network and images can be removed.
-	if s.docker != nil {
-		if container, cerr := s.docker.ContainerByName(r.Context(), app.Name); cerr == nil && container != nil {
-			s.docker.StopContainer(r.Context(), container.ID, 20)
-			s.docker.RemoveContainer(r.Context(), container.ID)
-		}
-	}
-
-	// Volume records are meaningless once the application is gone; the ticked
-	// option controls the stored data behind them.
-	removed := 0
-	if volumes, err := s.store.Applications.VolumesByTarget(r.Context(), db.TargetApplication, id); err == nil {
-		for _, volume := range volumes {
-			if cleanVolumes && removablePath(volume.HostPath) {
-				if err := os.RemoveAll(volume.HostPath); err == nil {
-					removed++
-				} else {
-					s.logger.Warn("could not remove volume path", "path", volume.HostPath, "error", err)
-				}
-			}
-			s.store.Applications.DeleteVolume(r.Context(), volume.ID)
-		}
-	}
-	result["volumesRemoved"] = removed
-
-	if cleanNetworks && s.docker != nil {
-		if err := s.docker.RemoveNetwork(r.Context(), deploy.NetworkName(app)); err == nil {
-			result["networkRemoved"] = true
-		}
-	}
-
-	if cleanConfig {
-		workspace := filepath.Join(s.cfg.DataDir, "workspaces", app.ID)
-		if err := os.RemoveAll(workspace); err == nil {
-			result["configRemoved"] = true
-		}
-	}
-
-	if runDockerCleanup && s.docker != nil {
-		var reclaimed int64
-		if bytes, err := s.docker.PruneImages(r.Context()); err == nil {
-			reclaimed += bytes
-		}
-		if bytes, err := s.docker.BuildCachePrune(r.Context()); err == nil {
-			reclaimed += bytes
-		}
-		// The application's own built images also qualify.
-		slug := "/" + strings.ToLower(strings.TrimSpace(app.Name)) + ":"
-		if images, err := s.docker.ListImages(r.Context()); err == nil {
-			for _, summary := range images {
-				for _, tag := range summary.RepoTags {
-					if strings.Contains(tag, slug) {
-						_ = s.docker.RemoveImage(r.Context(), tag)
-					}
-				}
-			}
-		}
-		result["spaceReclaimed"] = reclaimed
-	}
+	result := s.teardownApplication(r.Context(), app, teardownOptions{
+		Volumes:   r.URL.Query().Get("volumes") == "1",
+		Networks:  r.URL.Query().Get("networks") == "1",
+		Workspace: r.URL.Query().Get("config") == "1",
+		Routes:    true,
+		Images:    r.URL.Query().Get("cleanup") == "1",
+		Prune:     r.URL.Query().Get("cleanup") == "1",
+	})
 
 	if err := s.store.Applications.DeleteApplication(r.Context(), id); err != nil {
 		mapError(w, err)
 		return
 	}
 	s.audit(r.Context(), r, "application.delete", "application", id, result)
-	s.clearRoutes(r.Context(), id)
 	writeJSON(w, http.StatusOK, result)
-}
-
-// removablePath reports whether a volume path is safe to delete: something
-// specific, never a system directory.
-func removablePath(path string) bool {
-	path = filepath.Clean(strings.TrimSpace(path))
-	if path == "" || path == "." || path == string(filepath.Separator) {
-		return false
-	}
-	protected := map[string]bool{
-		"/": true, "/bin": true, "/boot": true, "/dev": true, "/etc": true, "/home": true,
-		"/lib": true, "/opt": true, "/proc": true, "/root": true, "/run": true, "/sbin": true,
-		"/srv": true, "/sys": true, "/tmp": true, "/usr": true, "/var": true,
-	}
-	return !protected[path]
 }
 
 // --- domains ---
@@ -416,16 +503,6 @@ func (s *Server) syncRoutes(ctx context.Context, appID string) {
 	}
 	if err := s.pipeline.SyncApplicationRoutes(ctx, appID); err != nil {
 		s.logger.Warn("route sync failed", "application", appID, "error", err)
-	}
-}
-
-// clearRoutes empties an application's routing file after a delete.
-func (s *Server) clearRoutes(ctx context.Context, appID string) {
-	if s.pipeline == nil {
-		return
-	}
-	if err := s.pipeline.ClearApplicationRoutes(ctx, appID); err != nil {
-		s.logger.Warn("route clear failed", "application", appID, "error", err)
 	}
 }
 
@@ -599,7 +676,13 @@ func (s *Server) checkApplicationDomains(w http.ResponseWriter, r *http.Request)
 func (s *Server) checkDomainDNS(ctx context.Context, domain *db.Domain) *db.Domain {
 	host := strings.SplitN(domain.Host, ":", 2)[0]
 	status := "mismatch"
-	want := s.panelIPv4(ctx)
+	want := ""
+	if app, err := s.store.Applications.ApplicationByID(ctx, domain.ApplicationID); err == nil {
+		// Compare against the engine that actually serves this application.
+		// A remote application's hostname must resolve to its node, not to the
+		// panel's public address.
+		want = s.appIPv4(ctx, app)
+	}
 	if want != "" {
 		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -682,7 +765,7 @@ func normalizeHost(host string) string {
 // resolves any subdomain carrying an IP back to it, so http:// works with no
 // DNS setup — the same convenience Coolify offers.
 func (s *Server) defaultDomain(ctx context.Context, app *db.Application) string {
-	ip := s.panelIPv4(ctx)
+	ip := s.appIPv4(ctx, app)
 	if ip == "" {
 		return ""
 	}
@@ -691,6 +774,22 @@ func (s *Server) defaultDomain(ctx context.Context, app *db.Application) string 
 		shortID = shortID[:6]
 	}
 	return fmt.Sprintf("%s-%s.%s.sslip.io", hostSlug(app.Name), shortID, ip)
+}
+
+// appIPv4 is the address an application's hostnames should resolve to: the
+// panel's public address for local workloads, or the remote node's address.
+func (s *Server) appIPv4(ctx context.Context, app *db.Application) string {
+	if app == nil {
+		return ""
+	}
+	if app.NodeID == "" || app.NodeID == "local" || app.NodeID == db.LocalNodeID {
+		return s.panelIPv4(ctx)
+	}
+	node, err := s.store.Nodes.NodeByID(ctx, app.NodeID)
+	if err != nil {
+		return ""
+	}
+	return resolveIPv4(ctx, node.Address)
 }
 
 // panelIPv4 finds the panel's public IPv4: from PANEL_PUBLIC_URL when it holds
@@ -710,6 +809,34 @@ func (s *Server) panelIPv4(ctx context.Context) string {
 		return ""
 	}
 
+	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil {
+		return ""
+	}
+	for _, address := range addresses {
+		if v4 := address.IP.To4(); v4 != nil {
+			return v4.String()
+		}
+	}
+	return ""
+}
+
+// resolveIPv4 turns a node address into the IPv4 used for sslip.io. It accepts
+// a literal address or a hostname, never a URL with a path.
+func resolveIPv4(ctx context.Context, address string) string {
+	host := strings.TrimSpace(address)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String()
+		}
+		return ""
+	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
@@ -854,8 +981,25 @@ func (s *Server) listVolumes(w http.ResponseWriter, r *http.Request) {
 type volumeRequest struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
-	HostPath  string `json:"hostPath"`
 	ReadOnly  bool   `json:"readOnly"`
+}
+
+// validateMountPath accepts the absolute in-container path a named volume is
+// mounted at. The panel never turns this into a host path, so the important
+// checks are Docker's own path grammar and preventing a record that would
+// shadow "/" or contain traversal components.
+func validateMountPath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" || !strings.HasPrefix(value, "/") {
+		return "", errors.New("mountPath must be an absolute container path")
+	}
+	if strings.ContainsRune(value, 0) || strings.ContainsAny(value, "\r\n\\") || strings.Contains(value, "..") {
+		return "", errors.New("mountPath contains an invalid component")
+	}
+	if len(value) > 512 {
+		return "", errors.New("mountPath is too long")
+	}
+	return value, nil
 }
 
 func (s *Server) createVolume(w http.ResponseWriter, r *http.Request) {
@@ -864,18 +1008,33 @@ func (s *Server) createVolume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if strings.TrimSpace(req.MountPath) == "" || strings.TrimSpace(req.Name) == "" {
-		writeError(w, http.StatusBadRequest, "name and mountPath are required")
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	mountPath, err := validateMountPath(req.MountPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	appID := chi.URLParam(r, "id")
+	if _, err := s.store.Applications.ApplicationByID(r.Context(), appID); err != nil {
+		mapError(w, err)
+		return
+	}
+	id := db.NewID()
 	volume := &db.Volume{
-		ID:        db.NewID(),
+		ID:        id,
 		Target:    db.TargetApplication,
-		TargetID:  chi.URLParam(r, "id"),
-		Name:      strings.TrimSpace(req.Name),
-		MountPath: req.MountPath,
-		HostPath:  req.HostPath,
-		ReadOnly:  req.ReadOnly,
+		TargetID:  appID,
+		Name:      name,
+		MountPath: mountPath,
+		// The engine-side name is derived only from the record ID. No host path
+		// is accepted from clients: that was an arbitrary bind-mount and delete
+		// primitive against the Docker host.
+		HostPath: deploy.VolumeName(id),
+		ReadOnly: req.ReadOnly,
 	}
 	if err := s.store.Applications.CreateVolume(r.Context(), volume); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -885,7 +1044,23 @@ func (s *Server) createVolume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteVolume(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.Applications.DeleteVolume(r.Context(), chi.URLParam(r, "volumeID")); err != nil {
+	volume, err := s.store.Applications.VolumeByID(r.Context(), chi.URLParam(r, "volumeID"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	if volume.Target != db.TargetApplication {
+		writeError(w, http.StatusNotFound, "volume not found")
+		return
+	}
+	if app, err := s.store.Applications.ApplicationByID(r.Context(), volume.TargetID); err == nil {
+		if client, err := s.clientForNode(r.Context(), app.NodeID); err == nil {
+			if err := client.RemoveVolume(r.Context(), deploy.VolumeName(volume.ID)); err != nil {
+				s.logger.Warn("could not remove named volume", "volume", volume.ID, "error", err)
+			}
+		}
+	}
+	if err := s.store.Applications.DeleteVolume(r.Context(), volume.ID); err != nil {
 		mapError(w, err)
 		return
 	}

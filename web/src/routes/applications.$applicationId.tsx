@@ -4,6 +4,7 @@ import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, Rota
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { XTerminal } from "@/components/terminal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,9 +52,28 @@ function sanitizeName(name: string): string {
   return out || "app";
 }
 
+// Engine names are built from the immutable application id on the backend, so
+// renames never orphan a container and equal display names cannot collide.
+const containerName = (app: Application) => `meghify-app-${sanitizeName(app.id)}`;
+const networkName = (app: Application) => `meghify-net-${sanitizeName(app.id)}`;
+
 export function ApplicationDetailPage() {
   const { applicationId } = useParams({ from: "/applications/$applicationId" });
   const queryClient = useQueryClient();
+  const { user } = useSession();
+  const isAdmin = user?.role === "admin";
+  // Members can inspect the runtime and operate deployments, but editing the
+  // build, domains, environment, volumes or networking is an admin action.
+  const memberSections: Section[] = [
+    "general",
+    "volumes",
+    "logs",
+    "runtimeLogs",
+    "deployments",
+  ];
+  const sections = SECTIONS.filter(
+    (item) => isAdmin || memberSections.includes(item.key),
+  );
   const [section, setSection] = useState<Section>("general");
   // Set when a history row is picked; cleared when the section changes to Logs
   // through the nav, which then falls back to the latest deployment.
@@ -131,15 +151,17 @@ export function ApplicationDetailPage() {
         description={application?.gitRepository || "Image deployment"}
         actions={
           <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSection("terminal")}
-              disabled={application?.status !== "running"}
-              title="Open terminal"
-            >
-              <Terminal className="h-4 w-4" />
-            </Button>
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSection("terminal")}
+                disabled={application?.status !== "running"}
+                title="Open terminal"
+              >
+                <Terminal className="h-4 w-4" />
+              </Button>
+            )}
             <ActionsMenu
               deployPending={deploy.isPending}
               busy={Boolean(active)}
@@ -180,7 +202,7 @@ export function ApplicationDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
         <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-          {SECTIONS.map((item) => (
+          {sections.map((item) => (
             <button
               key={item.key}
               onClick={() => setSection(item.key)}
@@ -201,13 +223,18 @@ export function ApplicationDetailPage() {
           {section === "general" &&
             (application ? (
               <div className="space-y-3">
-                <ApplicationDetailsCard app={application} applicationId={applicationId} />
-                {application.repositoryFullName && (
+                <ApplicationDetailsCard
+                  app={application}
+                  applicationId={applicationId}
+                  readOnly={!isAdmin}
+                />
+                {isAdmin && application.repositoryFullName && (
                   <GitHubCard app={application} applicationId={applicationId} />
                 )}
                 <AccessCard
                   app={application}
                   domains={domains.data ?? []}
+                  canEdit={isAdmin}
                   onManageDomains={() => setSection("domains")}
                   onEditNetworking={() => setSection("networking")}
                 />
@@ -289,7 +316,6 @@ export function ApplicationDetailPage() {
                     head={
                       <>
                         <Th>Name</Th>
-                        <Th>Host path</Th>
                         <Th>Mount path</Th>
                         <Th align="right">Read only</Th>
                       </>
@@ -298,9 +324,6 @@ export function ApplicationDetailPage() {
                     {(volumes.data ?? []).map((volume) => (
                       <Tr key={volume.id}>
                         <Td>{volume.name}</Td>
-                        <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
-                          {volume.hostPath || "-"}
-                        </Td>
                         <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
                           {volume.mountPath}
                         </Td>
@@ -338,7 +361,15 @@ export function ApplicationDetailPage() {
 }
 
 /** Name and description are editable in place, mirroring every other settings card. */
-function ApplicationDetailsCard({ app, applicationId }: { app: Application; applicationId: string }) {
+function ApplicationDetailsCard({
+  app,
+  applicationId,
+  readOnly = false,
+}: {
+  app: Application;
+  applicationId: string;
+  readOnly?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(app.name);
   const [description, setDescription] = useState(app.description);
@@ -372,29 +403,39 @@ function ApplicationDetailsCard({ app, applicationId }: { app: Application; appl
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="application-name">Name</Label>
-            <Input id="application-name" value={name} onChange={(event) => setName(event.target.value)} />
+            <Input
+              id="application-name"
+              value={name}
+              disabled={readOnly}
+              onChange={(event) => setName(event.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="application-description">Description</Label>
             <Input
               id="application-description"
               value={description}
+              disabled={readOnly}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="What does this application do?"
             />
           </div>
         </div>
-        {save.isError && <p className="text-[11px] text-danger">{errorText(save.error)}</p>}
-        <div className="flex justify-end">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!dirty || name.trim() === "" || save.isPending}
-            onClick={() => save.mutate()}
-          >
-            Save
-          </Button>
-        </div>
+        {!readOnly && save.isError && (
+          <p className="text-[11px] text-danger">{errorText(save.error)}</p>
+        )}
+        {!readOnly && (
+          <div className="flex justify-end">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!dirty || name.trim() === "" || save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -414,19 +455,10 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) =>
-      api.put<Application>(`/applications/${applicationId}`, {
-        name: app.name,
-        description: app.description,
-        gitRepository: app.gitRepository,
-        gitBranch: app.gitBranch,
-        buildPack: app.buildPack,
-        dockerfile: app.dockerfile,
-        baseDirectory: app.baseDirectory,
-        port: app.port,
-        healthCheck: app.healthCheck,
-        nodeId: app.nodeId,
-        autoDeploy: enabled,
-      }),
+      api.put<Application>(
+        `/applications/${applicationId}`,
+        applicationPayload(app, { autoDeploy: enabled }),
+      ),
     onSuccess: async (_updated, enabled) => {
       toast.success(
         enabled ? "Automatic deploys enabled for this branch" : "Automatic deploys disabled",
@@ -503,11 +535,13 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
 function AccessCard({
   app,
   domains,
+  canEdit,
   onManageDomains,
   onEditNetworking,
 }: {
   app: Application;
   domains: Domain[];
+  canEdit: boolean;
   onManageDomains: () => void;
   onEditNetworking: () => void;
 }) {
@@ -546,17 +580,25 @@ function AccessCard({
                       : "domain managed elsewhere"}
                 </div>
               </div>
-              <Button variant="neutral" size="sm" onClick={onManageDomains}>
-                Manage
-              </Button>
+              {canEdit && (
+                <Button variant="neutral" size="sm" onClick={onManageDomains}>
+                  Manage
+                </Button>
+              )}
             </div>
           ) : (
             <p className="mt-1 text-black/45 dark:text-white/40">
-              No public URL yet.{" "}
-              <button className="text-brand hover:underline" onClick={onManageDomains}>
-                Add a domain
-              </button>{" "}
-              to expose this application over HTTP.
+              {canEdit ? (
+                <>
+                  No public URL yet.{" "}
+                  <button className="text-brand hover:underline" onClick={onManageDomains}>
+                    Add a domain
+                  </button>{" "}
+                  to expose this application over HTTP.
+                </>
+              ) : (
+                "No public URL yet."
+              )}
             </p>
           )}
         </div>
@@ -566,20 +608,22 @@ function AccessCard({
             <div className="text-[11px] tracking-wider text-black/40 uppercase dark:text-white/35">
               Internal access
             </div>
-            <Button variant="neutral" size="sm" onClick={onEditNetworking}>
-              Edit networking
-            </Button>
+            {canEdit && (
+              <Button variant="neutral" size="sm" onClick={onEditNetworking}>
+                Edit networking
+              </Button>
+            )}
           </div>
           <div className="mt-1.5 space-y-1.5">
-            <Row label="Container name" value={`meghify-${sanitizeName(app.name)}`} />
-            <Row label="Docker network" value={`meghify-${sanitizeName(app.name)}`} />
+            <Row label="Container name" value={containerName(app)} />
+            <Row label="Docker network" value={networkName(app)} />
             <Row label="Exposed port" value={String(app.port)} />
             <Row label="Port mappings" value={app.portMappings || "none"} />
           </div>
           <p className="mt-2 text-[10.5px] text-black/35 dark:text-white/30">
             Reachable from other containers on the same network as{" "}
             <span className="font-mono">
-              meghify-{sanitizeName(app.name)}:{app.port}
+              {containerName(app)}:{app.port}
             </span>
             .
           </p>
@@ -1795,9 +1839,9 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
             </div>
           </div>
           <div className="space-y-1.5">
-            <Row label="Container name" value={`meghify-${sanitizeName(app.name)}`} />
-            <Row label="Docker network" value={`meghify-${sanitizeName(app.name)}`} />
-            <Row label="Network alias" value={sanitizeName(app.name)} />
+            <Row label="Container name" value={containerName(app)} />
+            <Row label="Docker network" value={networkName(app)} />
+            <Row label="Network alias" value={containerName(app)} />
           </div>
           <div className="flex justify-end border-t border-line/40 pt-3">
             <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>

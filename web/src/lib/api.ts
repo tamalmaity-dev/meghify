@@ -11,7 +11,7 @@ export const queryClient = new QueryClient({
       staleTime: 5_000,
       gcTime: 5 * 60_000,
       retry: (failureCount, error) => {
-        if (error instanceof Error && error.message.includes("401")) return false;
+        if (error instanceof ApiError && error.status === 401) return false;
         return failureCount < 2;
       },
       refetchOnWindowFocus: false,
@@ -25,6 +25,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -41,21 +42,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
 
-  if (response.status === 401) {
-    // A 401 anywhere means the session is gone; drop to the login screen.
-    window.location.assign("/login");
-    throw new ApiError(401, "Not authenticated");
-  }
-
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
+    let code: string | undefined;
     try {
-      const body = (await response.json()) as { error?: string };
+      const body = (await response.json()) as { error?: string; code?: string };
       if (body.error) message = body.error;
+      code = body.code;
     } catch {
       // Non-JSON error bodies are treated as opaque failures.
     }
-    throw new ApiError(response.status, message);
+
+    // Only an authentication challenge means the cookie is gone. A failed
+    // login, a wrong TOTP code or a wrong current password are normal 401s
+    // that the calling form must render — never redirect on those.
+    if (
+      response.status === 401 &&
+      message === "authentication required" &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      window.location.assign("/login");
+    }
+    throw new ApiError(response.status, message, code);
   }
 
   if (response.status === 204) return undefined as T;

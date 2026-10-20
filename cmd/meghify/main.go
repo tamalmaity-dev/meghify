@@ -63,15 +63,19 @@ func run() error {
 		"addr", cfg.Addr,
 	)
 
-	// The auth secret encrypts secrets at rest. Generate one when missing so a
-	// first boot works without any setup beyond DB_DSN.
-	if cfg.AuthSecret == "" {
+	// The auth secret encrypts secrets at rest. Production must supply a stable
+	// value: generating a random one on every boot would silently break every
+	// sealed SSH key, environment variable and TOTP seed after a restart.
+	if strings.TrimSpace(cfg.AuthSecret) == "" {
+		if cfg.IsProduction() {
+			return errors.New("AUTH_SECRET must be set in production (generate one with: openssl rand -hex 32)")
+		}
 		secret, err := auth.RandomToken(32)
 		if err != nil {
 			return err
 		}
 		cfg.AuthSecret = secret
-		logger.Warn("AUTH_SECRET not set, generated a random one; stored secrets will not survive a restart",
+		logger.Warn("AUTH_SECRET not set, generated a development secret; stored secrets will not survive a restart",
 			"hint", "persist it in your environment")
 	}
 
@@ -113,12 +117,28 @@ func run() error {
 		}
 		return key.PrivateKeyEnc, nil
 	})
+	node.SetHostKeySink(func(ctx context.Context, nodeID, fingerprint string) error {
+		logger.Info("pinned ssh host key on first connection", "node", nodeID, "fingerprint", fingerprint)
+		return store.Nodes.SetNodeHostKey(ctx, nodeID, fingerprint)
+	})
+
+	resolveClient := func(ctx context.Context, nodeID string) (*docker.Client, error) {
+		if nodeID == "" || nodeID == "local" || nodeID == db.LocalNodeID {
+			return nodeRegistry.ClientFor(ctx, nil)
+		}
+		n, err := store.Nodes.NodeByID(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return nodeRegistry.ClientFor(ctx, n)
+	}
 
 	pipeline := deploy.NewPipeline(deploy.Options{
-		Store:   store,
-		Secrets: box,
-		Client:  localClient,
-		DataDir: cfg.DataDir,
+		Store:     store,
+		Secrets:   box,
+		Client:    localClient,
+		ClientFor: resolveClient,
+		DataDir:   cfg.DataDir,
 		Registry: deploy.RegistryConfig{
 			URL:  cfg.RegistryURL,
 			User: cfg.RegistryUser,
@@ -149,7 +169,7 @@ func run() error {
 		Concurrency: cfg.WorkerConcurrency,
 		Logger:      logger,
 	})
-	registerJobs(runner, pipeline, store, hub, localClient, cfg, logger)
+	registerJobs(runner, pipeline, store, hub, localClient, nodeRegistry, resolveClient, cfg, logger)
 
 	// The compiled frontend is embedded so the panel ships as a single binary.
 	// `go build -tags web_assets ./cmd/meghify` after running the web build
@@ -193,7 +213,12 @@ func run() error {
 	// Reconcile what an unclean exit left behind before the queue starts:
 	// running deployments become canceled, orphaned build helpers are removed.
 	recoverCtx, recoverDone := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
-	deploy.RecoverInterrupted(recoverCtx, store, localClient, logger)
+	deploy.RecoverInterrupted(recoverCtx, store, resolveClient, logger)
+	if requeued, err := store.Jobs.RequeueRunning(recoverCtx); err != nil {
+		logger.Warn("could not requeue interrupted jobs", "error", err)
+	} else if requeued > 0 {
+		logger.Warn("requeued jobs interrupted by restart", "jobs", requeued)
+	}
 	recoverDone()
 
 	runner.Start(ctx)
@@ -232,6 +257,8 @@ func registerJobs(
 	store *db.Store,
 	hub *realtime.Hub,
 	client *docker.Client,
+	nodes *node.Registry,
+	resolveClient func(context.Context, string) (*docker.Client, error),
 	cfg *config.Config,
 	logger *slog.Logger,
 ) {
@@ -239,11 +266,6 @@ func registerJobs(
 		var body deploy.Payload
 		if err := jsonUnmarshal(payload, &body); err != nil {
 			return err
-		}
-		if body.ApplicationID != "" {
-			if app, err := store.Applications.ApplicationByID(ctx, body.ApplicationID); err == nil && app.NodeID != "" {
-				// A node-pinned application builds on that node's engine.
-			}
 		}
 		return pipeline.Run(ctx, body)
 	})
@@ -255,23 +277,21 @@ func registerJobs(
 		if err := jsonUnmarshal(payload, &body); err != nil {
 			return err
 		}
-		service, err := store.Resources.ServiceByID(ctx, body.ServiceID)
-		if err != nil {
-			return err
+		if body.ServiceID == "" {
+			return errors.New("service job has no serviceId")
 		}
-		// Compose stacks are applied by the pipeline's compose path.
-		return pipeline.Run(ctx, deploy.Payload{
-			DeploymentID:  service.ID,
-			ApplicationID: "",
-			NoCache:       false,
-		})
+		return pipeline.DeployService(ctx, body.ServiceID)
 	})
 
 	// Kept so telemetry rows queued by releases before v0.1.8 still drain. New
 	// samples run straight from the scheduler (see below) and never enter the
 	// queue, so the Job queue page only ever shows real work.
 	runner.Register(db.JobNodeMetrics, func(ctx context.Context, payload string) error {
-		return collectMetrics(ctx, store, client)
+		if err := collectMetrics(ctx, store, client); err != nil {
+			return err
+		}
+		collectRemoteMetrics(ctx, store, nodes, resolveClient, logger)
+		return nil
 	})
 
 	runner.Register(db.JobGC, func(ctx context.Context, payload string) error {
@@ -298,6 +318,14 @@ func registerJobs(
 		if err := collectMetrics(ctx, store, client); err != nil {
 			logger.Warn("metrics collection failed", "error", err)
 		}
+		// Remote sampling is slower (one SSH round trip per server). Run it
+		// off the scheduler goroutine so a dead node cannot delay local
+		// samples; the interval guard inside coalesces overlapping runs.
+		go func() {
+			remoteCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			collectRemoteMetrics(remoteCtx, store, nodes, resolveClient, logger)
+		}()
 	})
 	runner.RegisterCron("@every 1h", db.JobGC, "")
 

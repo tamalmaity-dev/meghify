@@ -108,7 +108,7 @@ func (p *Pipeline) newBuilder(ctx context.Context, sink io.Writer, app *db.Appli
 	}
 	// Register before the start call: a kill that arrives while the container
 	// is starting must still find and remove it.
-	p.registerHelper(deploymentID, id)
+	p.registerHelper(deploymentID, id, p.client)
 	if err := p.client.StartContainer(ctx, id); err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		_ = p.client.RemoveContainer(cleanupCtx, id)

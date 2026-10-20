@@ -9,6 +9,7 @@ package realtime
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,7 +54,10 @@ func (c *client) send(e Event) bool {
 		return true
 	default:
 		// A slow consumer is dropped rather than allowed to grow the buffer.
+		// Closing the channel is essential: the Stream goroutine is selecting
+		// on it and would otherwise stay alive forever after remove().
 		c.closed = true
+		close(c.ch)
 		return false
 	}
 }
@@ -116,6 +120,11 @@ func (h *Hub) BroadcastApplication(applicationID string, payload any) {
 	h.Broadcast("application:"+applicationID, payload)
 }
 
+// BroadcastNode publishes server reachability changes on the node channel.
+func (h *Hub) BroadcastNode(nodeID string, payload any) {
+	h.Broadcast("node:"+nodeID, payload)
+}
+
 func (h *Hub) remove(c *client) {
 	h.mu.Lock()
 	delete(h.clients, c)
@@ -137,6 +146,12 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channel := r.URL.Query().Get("channel")
+	if !validChannel(channel) {
+		// A global replay would hand every authenticated user the build logs of
+		// every application. Subscribers must name the stream they need.
+		http.Error(w, "a deployment, application or node channel is required", http.StatusBadRequest)
+		return
+	}
 	replay := r.URL.Query().Get("replay") != "0"
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -209,6 +224,28 @@ func writeEvent(w http.ResponseWriter, e Event) bool {
 	}
 	_, err = w.Write([]byte("\n\n"))
 	return err == nil
+}
+
+// validChannel accepts only the namespaced streams the panel actually emits.
+func validChannel(channel string) bool {
+	prefixes := []string{"deployment:", "application:", "node:"}
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(channel, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(channel, prefix)
+		if rest == "" {
+			return false
+		}
+		for _, r := range rest {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+				(r < '0' || r > '9') && r != '-' && r != '_' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // Mount registers the SSE endpoint.

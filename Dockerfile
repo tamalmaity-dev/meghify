@@ -30,16 +30,25 @@ COPY . .
 COPY --from=web /internal/webui/dist ./internal/webui/dist
 # linux/arm64 works too, which is what makes the panel usable on a Pi.
 ENV CGO_ENABLED=0 GOOS=linux
+# Declared so Compose can stamp the release metadata into the binary; the shell
+# fallbacks keep plain `docker build` working without arguments.
+ARG VERSION=dev
+ARG COMMIT=unknown
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -tags web_assets -trimpath -ldflags="-s -w \
     -X github.com/tamalmaity-dev/meghify/internal/version.Version=${VERSION:-dev} \
     -X github.com/tamalmaity-dev/meghify/internal/version.Commit=${COMMIT:-unknown}" \
-    -o /out/meghify ./cmd/meghify
+    -o /out/meghify ./cmd/meghify && \
+    mkdir -p /out/data
 
 # --- runtime ---
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/meghify /usr/local/bin/meghify
+# The distroless image runs as uid/gid 65532. A freshly created named volume is
+# root-owned, so /data must ship with the right ownership or SQLite cannot even
+# create its first file.
+COPY --from=build --chown=65532:65532 /out/data /data
 
 # CA certificates so the panel can reach Let's Encrypt and git providers.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

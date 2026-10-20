@@ -16,12 +16,21 @@ services:
     # The panel talks to the Docker Engine on this host, which is what lets it
     # manage containers. It is the same privilege boundary Coolify uses.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The panel needs write access to the engine API; mounting the socket
+      # read-only only prevents modifying the socket file and has never made
+      # the Docker API read-only.
+      - /var/run/docker.sock:/var/run/docker.sock
       - meghify-data:/data
+    # The panel runs as distroless "nonroot" (65532). It must join the host
+    # group that owns /var/run/docker.sock or every engine call fails with
+    # EACCES. Set DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) in .env.
+    group_add:
+      - "${DOCKER_GID:?DOCKER_GID must be the host docker socket group}"
     environment:
       APP_ENV: ${APP_ENV:-production}
       PANEL_ADDR: ":8080"
       PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-http://localhost:8080}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       DB_DRIVER: ${DB_DRIVER:-sqlite}
       DATA_DIR: /data
       # Required in production. Generate with: openssl rand -hex 32

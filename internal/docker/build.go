@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -63,6 +64,11 @@ func (c *Client) Build(ctx context.Context, req BuildRequest, sink io.Writer) (*
 		sink = io.Discard
 	}
 
+	dockerfile, err := safeBuildPath(req.Dockerfile)
+	if err != nil {
+		return nil, err
+	}
+
 	contextReader, err := tarContext(req.ContextDir)
 	if err != nil {
 		return nil, fmt.Errorf("build context: %w", err)
@@ -71,7 +77,7 @@ func (c *Client) Build(ctx context.Context, req BuildRequest, sink io.Writer) (*
 
 	options := build.ImageBuildOptions{
 		Tags:       req.Tags,
-		Dockerfile: valueOrDefault(req.Dockerfile, "Dockerfile"),
+		Dockerfile: dockerfile,
 		BuildArgs:  req.BuildArgs,
 		Labels:     req.Labels,
 		Target:     req.Target,
@@ -159,6 +165,24 @@ func readBuildStream(body io.Reader, sink io.Writer) (*BuildResult, error) {
 		return out, err
 	}
 	return out, nil
+}
+
+// safeBuildPath keeps the Dockerfile reference inside the build context. The
+// Engine API rejects some traversal itself, but doing it here gives the panel a
+// clear error and protects older engines.
+func safeBuildPath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "Dockerfile", nil
+	}
+	if strings.Contains(value, "\\") || strings.ContainsRune(value, 0) {
+		return "", fmt.Errorf("dockerfile path is invalid")
+	}
+	cleaned := path.Clean(value)
+	if path.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("dockerfile path must be relative to the build context")
+	}
+	return cleaned, nil
 }
 
 func valueOrDefault(s, def string) string {

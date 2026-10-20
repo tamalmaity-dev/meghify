@@ -36,6 +36,10 @@ type Config struct {
 	// PublicURL is the externally reachable base URL of the panel. It is used
 	// to build absolute links in emails and webhooks.
 	PublicURL string `env:"PANEL_PUBLIC_URL" envDefault:"http://localhost:8080"`
+	// TrustProxy makes audit logs and rate limits use X-Forwarded-For /
+	// X-Real-IP. Only enable it when every request reaches the panel through a
+	// trusted reverse proxy; direct clients can forge those headers.
+	TrustProxy bool `env:"TRUST_PROXY" envDefault:"false"`
 
 	Dialect Dialect `env:"DB_DRIVER" envDefault:"sqlite"`
 	// DSN is either a file path (sqlite) or a postgres connection string.
@@ -50,13 +54,15 @@ type Config struct {
 	DataDir string `env:"DATA_DIR" envDefault:"/data"`
 
 	// AuthSecret encrypts secrets at rest (env vars, ssh keys, TOTP seeds).
-	// 32 bytes of hex. Generated on first boot when empty.
+	// Production refuses to start when it is empty; development generates an
+	// ephemeral value (stored secrets do not survive that restart).
 	AuthSecret string `env:"AUTH_SECRET"`
 
 	SessionTTL     time.Duration `env:"SESSION_TTL" envDefault:"720h"`
 	APITokenTTL    time.Duration `env:"API_TOKEN_TTL" envDefault:"8760h"`
 	PasswordMinLen int           `env:"PASSWORD_MIN_LEN" envDefault:"10"`
-	// AllowSignup lets the first user self-register. Disabled after that.
+	// AllowSignup permits self-registration after the first admin exists. The
+	// first account always bootstraps as admin.
 	AllowSignup bool `env:"ALLOW_SIGNUP" envDefault:"false"`
 
 	DockerHost string `env:"DOCKER_HOST" envDefault:"unix:///var/run/docker.sock"`

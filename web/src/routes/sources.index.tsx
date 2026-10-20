@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 import { api } from "@/lib/api";
+import { displayHost } from "@/lib/utils";
 import { PageHeader } from "@/components/app-shell";
 import { GitHubAppDialog } from "@/components/github-app-dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -168,7 +169,7 @@ export function SourcesPage() {
                             {app.name}
                           </Link>
                           <div className="mt-0.5 truncate text-[11px] text-black/45 dark:text-white/40">
-                            GitHub · {webBase(app).replace("https://", "")}
+                            GitHub · {displayHost(webBase(app))}
                           </div>
                         </div>
                       </div>

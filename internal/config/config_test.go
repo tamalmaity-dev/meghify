@@ -11,8 +11,8 @@ func TestEffectiveHelperImageFallsBackToLatest(t *testing.T) {
 	}
 }
 
-// A pinned BUILD_HELPER_IMAGE wins exactly as given: cleanup derives the
-// protected reference from it, so no trimming may alter it.
+// A pinned BUILD_HELPER_IMAGE wins over the release default. Surrounding
+// whitespace from an env file is trimmed before the reference is used.
 func TestEffectiveHelperImagePrefersOverride(t *testing.T) {
 	cfg := &Config{BuildHelperImage: "  ghcr.io/tamalmaity-dev/meghify-helper:test  "}
 	if got := cfg.EffectiveHelperImage(); got != "ghcr.io/tamalmaity-dev/meghify-helper:test" {

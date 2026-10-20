@@ -55,8 +55,8 @@ func routeFileName(appID string) string { return "app-" + appID + ".yml" }
 // Router and middleware names carry the application's slug so parallel files
 // can never collide inside Traefik's file-provider namespace.
 func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver bool) string {
-	slug := sanitizeName(app.Name)
-	backend := "http://" + docker.ManagedName(slug) + ":"
+	slug := routerSlug(app)
+	backend := "http://" + docker.ManagedName(ContainerName(app)) + ":"
 
 	type routed struct {
 		host, hostOnly string
@@ -200,30 +200,32 @@ func yamlString(value string) string {
 // proxy. It is idempotent and cheap: called after a release, from the domain
 // CRUD handlers and at boot.
 func (p *Pipeline) ApplicationRoutes(ctx context.Context, app *db.Application, domains []*db.Domain) error {
-	if p.client == nil || p.proxyImage == "" {
+	if p.proxyImage == "" {
 		return nil
 	}
-	if err := p.client.EnsureVolume(ctx, proxyCfgVolume); err != nil {
+	target := p.forNode(ctx, app.NodeID)
+	if target.clientErr != nil {
+		return target.clientErr
+	}
+	if target.client == nil {
+		return errors.New("no docker engine is configured for the target node")
+	}
+	if err := target.client.EnsureVolume(ctx, proxyCfgVolume); err != nil {
 		return err
 	}
-	return p.routeUpload(ctx, app, domains)
+	return target.routeUpload(ctx, app, domains)
 }
 
 // SyncApplicationRoutes rewrites the routing file of one application from the
 // database. Errors are reported to the caller (handlers log them); the proxy
 // keeps serving the last good file until then.
 func (p *Pipeline) SyncApplicationRoutes(ctx context.Context, appID string) error {
-	if p.client == nil || p.proxyImage == "" || p.store == nil {
+	if p.proxyImage == "" || p.store == nil {
 		return nil
 	}
 	app, err := p.store.Applications.ApplicationByID(ctx, appID)
 	if err != nil {
 		return err
-	}
-	if app.NodeID != "" {
-		// Node deployments manage their engine's proxy through the node
-		// channel; the local proxy knows nothing about them.
-		return nil
 	}
 	domains, err := p.store.Applications.DomainsByApplication(ctx, app.ID)
 	if err != nil {
@@ -232,12 +234,15 @@ func (p *Pipeline) SyncApplicationRoutes(ctx context.Context, appID string) erro
 	return p.ApplicationRoutes(ctx, app, domains)
 }
 
-// ClearApplicationRoutes empties an application's routing file. The copy API
-// can overwrite a file but not remove one, and an empty document removes
-// every router of the application from Traefik. Called when an application is
-// deleted.
-func (p *Pipeline) ClearApplicationRoutes(ctx context.Context, appID string) error {
-	return p.ApplicationRoutes(ctx, &db.Application{ID: appID}, nil)
+// ClearApplicationRoutes empties an application's routing file on the node
+// that hosts it. The copy API can overwrite a file but not remove one, and an
+// empty document removes every router of the application from Traefik. Called
+// before the application row is deleted, while the node id is still known.
+func (p *Pipeline) ClearApplicationRoutes(ctx context.Context, app *db.Application) error {
+	if app == nil {
+		return nil
+	}
+	return p.ApplicationRoutes(ctx, &db.Application{ID: app.ID, NodeID: app.NodeID}, nil)
 }
 
 // ReconcileRoutes runs after the panel restarts: install the current proxy
@@ -247,7 +252,7 @@ func (p *Pipeline) ReconcileRoutes(parent context.Context, logf func(msg string,
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	if p.client == nil || p.proxyImage == "" || p.store == nil {
+	if p.proxyImage == "" || p.store == nil {
 		return
 	}
 	ctx, done := context.WithTimeout(parent, time.Minute)
@@ -258,44 +263,61 @@ func (p *Pipeline) ReconcileRoutes(parent context.Context, logf func(msg string,
 		logf("proxy route reconcile could not list applications", "error", err)
 		return
 	}
-	domainsOf := make(map[string][]*db.Domain, len(apps))
-	needsProxy := false
+
+	// Each node runs its own proxy and has its own routing volume. Group by
+	// node so ensureProxy runs once per engine, then upload the files the
+	// apps on that engine need.
+	type nodeGroup struct {
+		nodeID  string
+		apps    []*db.Application
+		domains map[string][]*db.Domain
+	}
+	groups := map[string]*nodeGroup{}
 	for _, app := range apps {
 		domains, err := p.store.Applications.DomainsByApplication(ctx, app.ID)
 		if err != nil {
 			logf("proxy route reconcile could not load domains", "application", app.ID, "error", err)
 			continue
 		}
-		domainsOf[app.ID] = domains
-		if len(domains) > 0 {
-			needsProxy = true
-		}
-	}
-	// An application-less panel keeps ports 80/443 free: the proxy is only
-	// provisioned for real routing work.
-	if !needsProxy {
-		return
-	}
-
-	if err := p.client.EnsureVolume(ctx, proxyCfgVolume); err != nil {
-		logf("proxy route reconcile failed: could not ensure the routing volume", "error", err)
-		return
-	}
-	if err := p.ensureProxy(ctx, logSink{f: logf}); err != nil {
-		logf("proxy not running, routing reconcile skipped", "error", err)
-		return
-	}
-	synced := 0
-	for _, app := range apps {
-		domains := domainsOf[app.ID]
 		if len(domains) == 0 {
 			continue
 		}
-		if err := p.routeUpload(ctx, app, domains); err != nil {
-			logf("proxy route reconcile failed", "application", app.ID, "error", err)
+		nodeID := app.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		group := groups[nodeID]
+		if group == nil {
+			group = &nodeGroup{nodeID: app.NodeID, domains: map[string][]*db.Domain{}}
+			groups[nodeID] = group
+		}
+		group.apps = append(group.apps, app)
+		group.domains[app.ID] = domains
+	}
+	// An application-less panel keeps ports 80/443 free: the proxy is only
+	// provisioned for real routing work.
+	if len(groups) == 0 {
+		return
+	}
+
+	synced := 0
+	for key, group := range groups {
+		target := p.forNode(ctx, group.nodeID)
+		if target.clientErr != nil || target.client == nil {
+			logf("proxy route reconcile skipped an unavailable node", "node", key, "error", target.clientErr)
 			continue
 		}
-		synced++
+		if err := target.ensureProxy(ctx, logSink{f: logf}); err != nil {
+			logf("proxy not running, routing reconcile skipped", "node", key, "error", err)
+			continue
+		}
+		for _, app := range group.apps {
+			if err := target.routeUpload(ctx, app, group.domains[app.ID]); err != nil {
+				logf("proxy route reconcile failed", "application", app.ID, "node", key, "error", err)
+				continue
+			}
+			synced++
+		}
 	}
 	if synced > 0 {
 		logf("proxy routes reconciled", "applications", synced)
@@ -304,6 +326,9 @@ func (p *Pipeline) ReconcileRoutes(parent context.Context, logf func(msg string,
 
 // routeUpload writes the file, assuming the proxy exists.
 func (p *Pipeline) routeUpload(ctx context.Context, app *db.Application, domains []*db.Domain) error {
+	if p.client == nil {
+		return errors.New("no docker engine is configured for the target node")
+	}
 	proxy, err := p.client.ContainerByName(ctx, "proxy")
 	if err != nil {
 		return err

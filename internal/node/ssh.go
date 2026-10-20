@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -103,12 +104,18 @@ type Dialer struct {
 	User       string
 	PrivateKey string // PEM encoded
 
+	// HostKey is the pinned SHA256 fingerprint. Empty enables trust on first
+	// use: the fingerprint observed during the handshake is reported through
+	// OnHostKey and becomes the pin for every later connection.
+	HostKey   string
+	OnHostKey func(ctx context.Context, fingerprint string) error
+
 	mu     sync.Mutex
 	client *ssh.Client
 }
 
 // NewDialer builds a dialer for a node.
-func NewDialer(address string, port int, user, privateKeyPEM string) (*Dialer, error) {
+func NewDialer(address string, port int, user, privateKeyPEM, hostKey string, onHostKey func(context.Context, string) error) (*Dialer, error) {
 	if address == "" {
 		return nil, errors.New("node address is required")
 	}
@@ -121,7 +128,14 @@ func NewDialer(address string, port int, user, privateKeyPEM string) (*Dialer, e
 	if strings.TrimSpace(privateKeyPEM) == "" {
 		return nil, errors.New("node private key is required")
 	}
-	return &Dialer{Address: address, Port: port, User: user, PrivateKey: privateKeyPEM}, nil
+	return &Dialer{
+		Address:    address,
+		Port:       port,
+		User:       user,
+		PrivateKey: privateKeyPEM,
+		HostKey:    strings.TrimSpace(hostKey),
+		OnHostKey:  onHostKey,
+	}, nil
 }
 
 // Connect opens the SSH client, reusing a live one.
@@ -147,9 +161,27 @@ func (d *Dialer) Connect(ctx context.Context) (*ssh.Client, error) {
 	config := &ssh.ClientConfig{
 		User: d.User,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		// Nodes are provisioned by us, so host keys are not pinned in v1.
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			fingerprint := ssh.FingerprintSHA256(key)
+			if d.HostKey != "" {
+				if subtle.ConstantTimeCompare([]byte(d.HostKey), []byte(fingerprint)) != 1 {
+					return fmt.Errorf("ssh host key mismatch for %s: expected %s, got %s",
+						d.Address, d.HostKey, fingerprint)
+				}
+				return nil
+			}
+			// Trust on first use. Persist before accepting so a database
+			// failure cannot silently downgrade every later connection to TOFU.
+			if d.OnHostKey == nil {
+				return fmt.Errorf("ssh host key for %s is not pinned and no persistence sink is configured", d.Address)
+			}
+			if err := d.OnHostKey(ctx, fingerprint); err != nil {
+				return fmt.Errorf("record ssh host key for %s: %w", d.Address, err)
+			}
+			d.HostKey = fingerprint
+			return nil
+		},
+		Timeout: 10 * time.Second,
 	}
 
 	d.client, err = ssh.Dial("tcp", addr, config)

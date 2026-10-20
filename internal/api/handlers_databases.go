@@ -89,6 +89,17 @@ func (d dockerSpec) toDocker() *docker.ContainerSpec {
 	}
 }
 
+// databaseContainerName derives the engine name from the immutable record ID.
+// Using the display name let two databases called "cache" overwrite each
+// other's container.
+func databaseContainerName(database *db.Database) string {
+	return "db-" + database.ID
+}
+
+func databaseVolumeName(database *db.Database) string {
+	return "meghify-db-" + database.ID
+}
+
 func (s *Server) listDatabases(w http.ResponseWriter, r *http.Request) {
 	databases, err := s.store.Resources.ListDatabases(r.Context())
 	if err != nil {
@@ -139,6 +150,14 @@ func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "environmentId is required")
 		return
 	}
+	if _, err := s.store.Projects.EnvironmentByID(r.Context(), req.EnvironmentID); err != nil {
+		mapError(w, err)
+		return
+	}
+	if err := s.validateNodeSelection(r.Context(), req.NodeID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	defaults := databaseSpec(kind, req.Version)
 	rootPassword, err := randomSecret(24)
@@ -150,7 +169,7 @@ func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request) {
 	database := &db.Database{
 		ID:            db.NewID(),
 		EnvironmentID: req.EnvironmentID,
-		NodeID:        req.NodeID,
+		NodeID:        strings.TrimSpace(req.NodeID),
 		Name:          strings.TrimSpace(req.Name),
 		Kind:          kind,
 		Version:       defaults.Version,
@@ -178,13 +197,13 @@ func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := dockerSpec{
-		Name:    database.Name,
+		Name:    databaseContainerName(database),
 		Image:   imageRef,
 		Env:     databaseEnv(rootPassword),
 		Labels:  map[string]string{"meghify.resource": "database", "meghify.database": database.ID},
 		Ports:   map[int]int{defaults.Port: database.PublicPort},
 		Restart: "unless-stopped",
-		Volumes: []mountSpec{{Source: "meghify-db-" + database.ID, Target: defaults.DataPath}},
+		Volumes: []mountSpec{{Source: databaseVolumeName(database), Target: defaults.DataPath}},
 	}
 	containerID, err := client.CreateContainer(r.Context(), spec.toDocker())
 	if err != nil {
@@ -226,11 +245,8 @@ func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteDatabase(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	database, derr := s.store.Resources.DatabaseByID(r.Context(), id)
-	if derr == nil && s.docker != nil {
-		if container, cerr := s.docker.ContainerByName(r.Context(), database.Name); cerr == nil && container != nil {
-			s.docker.StopContainer(r.Context(), container.ID, 20)
-			s.docker.RemoveContainer(r.Context(), container.ID)
-		}
+	if derr == nil {
+		s.teardownDatabase(r.Context(), database, true)
 	}
 	if err := s.store.Resources.DeleteDatabase(r.Context(), id); err != nil {
 		mapError(w, err)
@@ -254,12 +270,13 @@ func (s *Server) databaseAction(w http.ResponseWriter, r *http.Request, action s
 		mapError(w, err)
 		return
 	}
-	if s.docker == nil {
-		writeError(w, http.StatusServiceUnavailable, "no docker engine configured")
+	client, err := s.clientForNode(r.Context(), database.NodeID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 
-	container, err := s.docker.ContainerByName(r.Context(), database.Name)
+	container, err := client.ContainerByName(r.Context(), databaseContainerName(database))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -274,7 +291,7 @@ func (s *Server) databaseAction(w http.ResponseWriter, r *http.Request, action s
 		// stored definition: the data volume and the sealed root password survive.
 		defaults := databaseSpec(database.Kind, database.Version)
 		imageRef := defaults.Image + ":" + defaults.Version
-		if err := s.docker.PullImage(r.Context(), imageRef, io.Discard); err != nil {
+		if err := client.PullImage(r.Context(), imageRef, io.Discard); err != nil {
 			writeError(w, http.StatusInternalServerError, "pull image: "+err.Error())
 			return
 		}
@@ -290,20 +307,20 @@ func (s *Server) databaseAction(w http.ResponseWriter, r *http.Request, action s
 			}
 		}
 
-		containerID, cerr := s.docker.CreateContainer(r.Context(), dockerSpec{
-			Name:    database.Name,
+		containerID, cerr := client.CreateContainer(r.Context(), dockerSpec{
+			Name:    databaseContainerName(database),
 			Image:   imageRef,
 			Env:     databaseEnv(rootPassword),
 			Labels:  map[string]string{"meghify.resource": "database", "meghify.database": id},
 			Ports:   map[int]int{defaults.Port: database.PublicPort},
 			Restart: "unless-stopped",
-			Volumes: []mountSpec{{Source: "meghify-db-" + database.ID, Target: defaults.DataPath}},
+			Volumes: []mountSpec{{Source: databaseVolumeName(database), Target: defaults.DataPath}},
 		}.toDocker())
 		if cerr != nil {
 			writeError(w, http.StatusInternalServerError, cerr.Error())
 			return
 		}
-		if serr := s.docker.StartContainer(r.Context(), containerID); serr != nil {
+		if serr := client.StartContainer(r.Context(), containerID); serr != nil {
 			writeError(w, http.StatusInternalServerError, serr.Error())
 			return
 		}
@@ -313,9 +330,9 @@ func (s *Server) databaseAction(w http.ResponseWriter, r *http.Request, action s
 	}
 
 	if action == "start" {
-		err = s.docker.StartContainer(r.Context(), container.ID)
+		err = client.StartContainer(r.Context(), container.ID)
 	} else {
-		err = s.docker.StopContainer(r.Context(), container.ID, 20*time.Second)
+		err = client.StopContainer(r.Context(), container.ID, 20*time.Second)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -349,6 +366,10 @@ type backupRequest struct {
 
 func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
 	databaseID := chi.URLParam(r, "id")
+	if _, err := s.store.Resources.DatabaseByID(r.Context(), databaseID); err != nil {
+		mapError(w, err)
+		return
+	}
 	var req backupRequest
 	if r.ContentLength > 0 {
 		if err := decode(r, &req); err != nil {
@@ -368,12 +389,14 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Always enqueue a run. A row that never enters the queue would sit
+	// pending forever; the handler currently fails the job with a clear
+	// "not implemented" error until dump/upload exists.
 	payload := `{"backupId":"` + backup.ID + `"}`
-	if req.Schedule != "" {
-		if _, err := s.store.Jobs.Enqueue(r.Context(), db.JobBackup, payload, time.Now(), 1); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	if _, err := s.store.Jobs.Enqueue(r.Context(), db.JobBackup, payload, time.Now(), 1); err != nil {
+		_ = s.store.Resources.DeleteBackup(r.Context(), backup.ID)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusCreated, backup)
 }

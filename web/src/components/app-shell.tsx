@@ -47,14 +47,14 @@ export function AuthWall({ children }: { children: React.ReactNode }) {
 }
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/projects", label: "Projects", icon: FolderKanban },
-  { to: "/databases", label: "Databases", icon: Database },
-  { to: "/sources", label: "Sources", icon: Github },
-  { to: "/nodes", label: "Servers", icon: Server },
-  { to: "/jobs", label: "Job queue", icon: Boxes },
-  { to: "/team", label: "Team", icon: Users },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true, adminOnly: false },
+  { to: "/projects", label: "Projects", icon: FolderKanban, adminOnly: false },
+  { to: "/databases", label: "Databases", icon: Database, adminOnly: false },
+  { to: "/sources", label: "Sources", icon: Github, adminOnly: true },
+  { to: "/nodes", label: "Servers", icon: Server, adminOnly: true },
+  { to: "/jobs", label: "Job queue", icon: Boxes, adminOnly: true },
+  { to: "/team", label: "Team", icon: Users, adminOnly: true },
+  { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },
 ] as const;
 
 /**
@@ -65,6 +65,7 @@ const NAV = [
 export function AppShell() {
   const { user } = useSession();
   const [theme, setTheme] = useTheme();
+  const nav = NAV.filter((item) => !item.adminOnly || user?.role === "admin");
 
   const logout = async () => {
     await api.post("/auth/logout");
@@ -82,7 +83,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-          {NAV.map(({ to, label, icon: Icon, ...options }) => (
+          {nav.map(({ to, label, icon: Icon, adminOnly: _adminOnly, ...options }) => (
             <Link
               key={to}
               to={to}
@@ -153,6 +154,8 @@ export function AppShell() {
 
 function MobileNav() {
   const [open, setOpen] = React.useState(false);
+  const { user } = useSession();
+  const nav = NAV.filter((item) => !item.adminOnly || user?.role === "admin");
   return (
     <div className="relative md:hidden">
       <Button variant="ghost" size="icon" onClick={() => setOpen(!open)} aria-label="Menu">
@@ -162,7 +165,7 @@ function MobileNav() {
       </Button>
       {open && (
         <div className="absolute top-full left-0 z-40 mt-1 w-48 rounded-md bg-base p-1 shadow-[var(--shadow-dropdown)] ring-1 ring-line/70">
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {nav.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}

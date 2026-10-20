@@ -69,12 +69,18 @@ export function useTotpEnroll() {
 }
 
 export function useTotpConfirm() {
-  return useMutation({ mutationFn: (code: string) => api.post("/me/totp", { code }) });
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.post("/me/totp", { code }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKey }),
+  });
 }
 
 export function useTotpDisable() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (password: string) => api.delete("/me/totp", { password }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKey }),
   });
 }
 

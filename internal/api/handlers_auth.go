@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +54,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hand the new admin a session so the UI can continue straight into setup.
-	if _, token, err := s.auth.IssueSession(r.Context(), user, clientIP(r), r.UserAgent()); err != nil {
+	if _, token, err := s.auth.IssueSession(r.Context(), user, s.clientIP(r), r.UserAgent()); err != nil {
 		s.logger.Error("issue bootstrap session", "error", err)
 	} else {
 		s.setSessionCookie(w, r, token, time.Now().Add(s.cfg.SessionTTL))
@@ -69,8 +71,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, session, token, err := s.auth.Login(r.Context(), req.Email, req.Password, req.Code,
-		clientIP(r), r.UserAgent())
+		s.clientIP(r), r.UserAgent())
 	if err != nil {
+		if errors.Is(err, auth.ErrTOTPRequired) {
+			// A stable machine-readable code lets the login screen reveal the
+			// authenticator field without guessing from the message text.
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "totp code required",
+				"code":  "totp_required",
+			})
+			return
+		}
 		mapError(w, err)
 		return
 	}
@@ -150,7 +161,21 @@ type profileRequest struct {
 	Name string `json:"name"`
 }
 
+// requireBrowserSession keeps account-security mutations on the cookie
+// session. A scoped API token must not be able to change the owner's password
+// or second factor and then inherit the account.
+func requireBrowserSession(w http.ResponseWriter, r *http.Request) bool {
+	if auth.APITokenFrom(r.Context()) != nil {
+		writeError(w, http.StatusForbidden, "this endpoint requires a signed-in browser session")
+		return false
+	}
+	return true
+}
+
 func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireBrowserSession(w, r) {
+		return
+	}
 	user := auth.UserFrom(r.Context())
 	var req profileRequest
 	if err := decode(r, &req); err != nil {
@@ -175,6 +200,9 @@ type passwordRequest struct {
 }
 
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	if !requireBrowserSession(w, r) {
+		return
+	}
 	user := auth.UserFrom(r.Context())
 	var req passwordRequest
 	if err := decode(r, &req); err != nil {
@@ -182,7 +210,9 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.VerifyPassword(req.Current, user.PasswordHash); err != nil {
-		writeError(w, http.StatusUnauthorized, "current password is incorrect")
+		// This is a form validation error, not an expired session: answering
+		// 400 keeps the browser from redirecting to the login screen.
+		writeError(w, http.StatusBadRequest, "current password is incorrect")
 		return
 	}
 	if len(req.New) < s.cfg.PasswordMinLen {
@@ -198,12 +228,34 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	// Invalidate other sessions once the password changes.
-	s.auth.RotateSessions(r.Context(), user.ID)
+	// Invalidate other sessions once the password changes. The current tab
+	// stays signed in; logging it out here would contradict the UI message and
+	// immediately 401 the next request.
+	s.rotateOtherSessions(r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// rotateOtherSessions invalidates every session for the caller except the
+// browser session making the request. Password and 2FA changes use it so a
+// stolen session cannot survive a credential or factor change.
+func (s *Server) rotateOtherSessions(r *http.Request) {
+	user := auth.UserFrom(r.Context())
+	if user == nil {
+		return
+	}
+	sessionID := ""
+	if current := auth.SessionFrom(r.Context()); current != nil {
+		sessionID = current.ID
+	}
+	if err := s.auth.RotateSessionsExcept(r.Context(), user.ID, sessionID); err != nil {
+		s.logger.Warn("session rotation failed", "user", user.ID, "error", err)
+	}
+}
+
 func (s *Server) totpEnroll(w http.ResponseWriter, r *http.Request) {
+	if !requireBrowserSession(w, r) {
+		return
+	}
 	user := auth.UserFrom(r.Context())
 	if user.TOTPEnabled {
 		writeError(w, http.StatusConflict, "two-factor is already enabled")
@@ -222,6 +274,9 @@ type totpRequest struct {
 }
 
 func (s *Server) totpConfirm(w http.ResponseWriter, r *http.Request) {
+	if !requireBrowserSession(w, r) {
+		return
+	}
 	user := auth.UserFrom(r.Context())
 	var req totpRequest
 	if err := decode(r, &req); err != nil {
@@ -232,6 +287,9 @@ func (s *Server) totpConfirm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Sessions created before 2FA was enabled must not bypass it. Keep the
+	// current browser signed in, invalidate every other session.
+	s.rotateOtherSessions(r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -240,6 +298,9 @@ type totpDisableRequest struct {
 }
 
 func (s *Server) totpDisable(w http.ResponseWriter, r *http.Request) {
+	if !requireBrowserSession(w, r) {
+		return
+	}
 	user := auth.UserFrom(r.Context())
 	var req totpDisableRequest
 	if err := decode(r, &req); err != nil {
@@ -250,6 +311,9 @@ func (s *Server) totpDisable(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
+	// A session that was open while 2FA was active may have been the reason
+	// the factor was removed; require every other browser to sign in again.
+	s.rotateOtherSessions(r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -298,17 +362,21 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	results["applications"] = filteredApps
 
-	nodes, err := s.store.Nodes.ListNodes(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	filteredNodes := make([]*db.Node, 0, len(nodes))
-	for _, n := range nodes {
-		if matches(n.Name) {
-			filteredNodes = append(filteredNodes, n)
+	filteredNodes := make([]*db.Node, 0)
+	if user := auth.UserFrom(ctx); user != nil && user.Role == db.RoleAdmin {
+		nodes, err := s.store.Nodes.ListNodes(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, n := range nodes {
+			if matches(n.Name) {
+				filteredNodes = append(filteredNodes, n)
+			}
 		}
 	}
+	// Server addresses and SSH fingerprints are admin-only; members still get
+	// projects and applications from the same search endpoint.
 	results["nodes"] = filteredNodes
 
 	writeJSON(w, http.StatusOK, results)
@@ -358,21 +426,64 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	target, err := s.store.Users.UserByID(r.Context(), id)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+
 	var req createUserRequest
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	role := req.Role
-	if role != db.RoleAdmin && role != db.RoleMember {
-		role = db.RoleMember
+	name := target.Name
+	if strings.TrimSpace(req.Name) != "" {
+		name = strings.TrimSpace(req.Name)
 	}
-	if err := s.store.Users.UpdateUserProfile(r.Context(), id, req.Name, role); err != nil {
+	role := target.Role
+	if req.Role != "" {
+		if req.Role != db.RoleAdmin && req.Role != db.RoleMember {
+			writeError(w, http.StatusBadRequest, "role must be admin or member")
+			return
+		}
+		role = req.Role
+	}
+
+	// Never allow the last admin to demote themselves (or be demoted), which
+	// would leave the instance without anyone who can administer it.
+	if target.Role == db.RoleAdmin && role != db.RoleAdmin {
+		admins, err := s.adminCount(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if admins <= 1 {
+			writeError(w, http.StatusConflict, "the last admin cannot be demoted")
+			return
+		}
+	}
+
+	if err := s.store.Users.UpdateUserProfile(r.Context(), id, name, role); err != nil {
 		mapError(w, err)
 		return
 	}
-	s.audit(r.Context(), r, "user.update", "user", id, nil)
+	s.audit(r.Context(), r, "user.update", "user", id, map[string]any{"role": role})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) adminCount(ctx context.Context) (int, error) {
+	users, err := s.store.Users.ListUsers(ctx)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, user := range users {
+		if user.Role == db.RoleAdmin {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -403,17 +514,41 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 type createTokenRequest struct {
-	Name string `json:"name"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
 }
 
 func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFrom(r.Context())
+	if token := auth.APITokenFrom(r.Context()); token != nil && len(token.Scopes) > 0 {
+		// A scoped token must not mint an unscoped token and thereby recover
+		// the owner's full privileges. Token management is browser-session
+		// only for scoped clients.
+		writeError(w, http.StatusForbidden, "create tokens from a signed-in browser session")
+		return
+	}
 	var req createTokenRequest
 	if err := decode(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	raw, token, err := s.auth.CreateAPIToken(r.Context(), user.ID, strings.TrimSpace(req.Name), nil, s.cfg.APITokenTTL)
+	scopes := make([]string, 0, len(req.Scopes))
+	seen := map[string]bool{}
+	for _, raw := range req.Scopes {
+		scope := strings.ToLower(strings.TrimSpace(raw))
+		if scope == "" {
+			continue
+		}
+		if !auth.ValidAPIScope(scope) {
+			writeError(w, http.StatusBadRequest, "unknown token scope "+scope)
+			return
+		}
+		if !seen[scope] {
+			seen[scope] = true
+			scopes = append(scopes, scope)
+		}
+	}
+	raw, token, err := s.auth.CreateAPIToken(r.Context(), user.ID, strings.TrimSpace(req.Name), scopes, s.cfg.APITokenTTL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -423,8 +558,12 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFrom(r.Context())
 	id := chi.URLParam(r, "id")
-	if err := s.store.Users.DeleteAPIToken(r.Context(), id); err != nil {
+	// Object-level authorization: a token can only be revoked by its owner.
+	// IDs are UUIDs, but an ownership predicate keeps a future shared ID space
+	// from turning this into a cross-account deletion primitive.
+	if err := s.store.Users.DeleteAPITokenForUser(r.Context(), id, user.ID); err != nil {
 		mapError(w, err)
 		return
 	}

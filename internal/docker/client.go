@@ -210,7 +210,7 @@ func (c *Client) CreateContainer(ctx context.Context, spec *ContainerSpec) (stri
 
 	resp, err := c.cli.ContainerCreate(ctx,
 		&container.Config{
-			Hostname:     spec.Name,
+			Hostname:     containerHostname(spec.Name),
 			Image:        spec.Image,
 			Env:          spec.Env,
 			Cmd:          spec.Cmd,
@@ -263,6 +263,22 @@ func containerName(name string) string {
 // container for one it manages.
 func ManagedName(name string) string {
 	return containerName(name)
+}
+
+// containerHostname turns a logical name into a valid RFC 1123 hostname. An
+// application named "My API" used to send "My API" as the hostname, which the
+// engine rejects because it contains a space and uppercase letters.
+func containerHostname(name string) string {
+	host := sanitize(name)
+	host = strings.ReplaceAll(host, "_", "-")
+	host = strings.Trim(host, "-.")
+	if host == "" {
+		host = "meghify"
+	}
+	if len(host) > 63 {
+		host = strings.TrimRight(host[:63], "-.")
+	}
+	return host
 }
 
 func sanitize(s string) string {
@@ -790,6 +806,19 @@ func (c *Client) EnsureVolume(ctx context.Context, name string) error {
 		Labels: map[string]string{"meghify.managed": "true"},
 	}); err != nil {
 		return fmt.Errorf("create volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// RemoveVolume deletes a named volume. A missing volume is not an error: the
+// caller is usually tearing down an application that may have failed before
+// its volume was created.
+func (c *Client) RemoveVolume(ctx context.Context, name string) error {
+	if err := c.cli.VolumeRemove(ctx, name, true); err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
 }

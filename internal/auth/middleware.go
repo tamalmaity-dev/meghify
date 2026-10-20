@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/config"
@@ -55,7 +56,9 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAuth rejects anonymous requests with 401.
+// RequireAuth rejects anonymous requests with 401 and enforces API token
+// scopes. Session cookies inherit the role of their user; a scoped API token
+// is limited to the actions its scopes grant.
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := UserFrom(r.Context())
@@ -63,11 +66,19 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
+		if token := APITokenFrom(r.Context()); token != nil && len(token.Scopes) > 0 {
+			required := requestScope(r)
+			if !tokenHasScope(token, required) {
+				writeAuthError(w, http.StatusForbidden, "this API token does not have the "+required+" scope")
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// RequireAdmin rejects non-admin members with 403.
+// RequireAdmin rejects non-admin members with 403. Scoped API tokens owned by
+// an admin also need the admin scope; an unscoped token inherits its owner.
 func (m *Middleware) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := UserFrom(r.Context())
@@ -79,8 +90,41 @@ func (m *Middleware) RequireAdmin(next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusForbidden, "admin role required")
 			return
 		}
+		if token := APITokenFrom(r.Context()); token != nil && len(token.Scopes) > 0 && !tokenHasScope(token, ScopeAdmin) {
+			writeAuthError(w, http.StatusForbidden, "this API token does not have the admin scope")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requestScope maps an HTTP action to the scope a token must hold. Read-only
+// requests need read; deploy endpoints need deploy; every other mutation needs
+// write. Admin is checked separately by RequireAdmin.
+func requestScope(r *http.Request) string {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return ScopeRead
+	case http.MethodPost:
+		if strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/deploy") {
+			return ScopeDeploy
+		}
+		return ScopeWrite
+	default:
+		return ScopeWrite
+	}
+}
+
+func tokenHasScope(token *db.APIToken, scope string) bool {
+	if token == nil || len(token.Scopes) == 0 {
+		return true
+	}
+	for _, granted := range token.Scopes {
+		if granted == scope || granted == ScopeAdmin {
+			return true
+		}
+	}
+	return false
 }
 
 // Guarded is a convenience helper that applies a method-aware guard.

@@ -20,11 +20,25 @@ type Service struct {
 	box     *SecretBox
 	cfg     *config.Config
 	nowFunc func() time.Time
+	// Separate buckets prevent one noisy source from locking out every account
+	// behind the same NAT, while still making one account expensive to guess.
+	loginByAccount *loginLimiter
+	loginByIP      *loginLimiter
 }
 
 // NewService builds the auth service.
 func NewService(store *db.Store, box *SecretBox, cfg *config.Config) *Service {
-	return &Service{store: store, box: box, cfg: cfg, nowFunc: time.Now}
+	return &Service{
+		store:   store,
+		box:     box,
+		cfg:     cfg,
+		nowFunc: time.Now,
+		// Ten guesses per account and forty per source address in a quarter of
+		// an hour: enough for a mistyped password, far too few for a brute-force
+		// run against an Argon2id verifier.
+		loginByAccount: newLoginLimiter(10, 15*time.Minute),
+		loginByIP:      newLoginLimiter(40, 15*time.Minute),
+	}
 }
 
 var (
@@ -40,6 +54,8 @@ var (
 	ErrSignupDisabled = errors.New("registration is disabled")
 	// ErrNoUsers is returned when bootstrap has not happened yet.
 	ErrNoUsers = errors.New("no users exist")
+	// ErrRateLimited means too many login attempts were made in a short window.
+	ErrRateLimited = errors.New("too many login attempts")
 )
 
 // HasUsers reports whether the instance has been bootstrapped.
@@ -138,7 +154,17 @@ func (s *Service) IssueSession(ctx context.Context, user *db.User, ip, userAgent
 // When the account has TOTP enabled a code is mandatory. A wrong code is
 // indistinguishable from a wrong password to the caller.
 func (s *Service) Login(ctx context.Context, email, password, code, ip, userAgent string) (*db.User, *db.Session, string, error) {
-	user, err := s.store.Users.UserByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
+	email = strings.ToLower(strings.TrimSpace(email))
+	accountKey := "account:" + email
+	ipKey := "ip:" + strings.TrimSpace(ip)
+	if ok, _ := s.loginByAccount.allow(accountKey); !ok {
+		return nil, nil, "", ErrRateLimited
+	}
+	if ok, _ := s.loginByIP.allow(ipKey); !ok {
+		return nil, nil, "", ErrRateLimited
+	}
+
+	user, err := s.store.Users.UserByEmail(ctx, email)
 	if errors.Is(err, db.ErrNotFound) {
 		// Spend the same time hashing so timing does not leak account existence.
 		_, _ = HashPassword(password)
@@ -156,11 +182,13 @@ func (s *Service) Login(ctx context.Context, email, password, code, ip, userAgen
 		if code == "" {
 			return nil, nil, "", ErrTOTPRequired
 		}
-		if err := s.VerifyTOTP(user.TOTPSecret, code); err != nil {
+		if err := s.VerifyUserTOTP(ctx, user, code); err != nil {
 			return nil, nil, "", ErrInvalidCredentials
 		}
 	}
 
+	s.loginByAccount.reset(accountKey)
+	s.loginByIP.reset(ipKey)
 	session, token, err := s.IssueSession(ctx, user, ip, userAgent)
 	if err != nil {
 		return nil, nil, "", err
@@ -265,9 +293,21 @@ func (s *Service) APIToken(ctx context.Context, raw string) (*db.User, *db.APITo
 	return user, token, nil
 }
 
-// RotateSession invalidates every session for a user.
+// RotateSessions invalidates every session for a user.
 func (s *Service) RotateSessions(ctx context.Context, userID string) error {
 	_, err := s.store.Handle().ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	return err
+}
+
+// RotateSessionsExcept invalidates every session except the one making the
+// request. It is what a password change should do: the current tab stays
+// signed in, every other browser is logged out.
+func (s *Service) RotateSessionsExcept(ctx context.Context, userID, keepSessionID string) error {
+	if keepSessionID == "" {
+		return s.RotateSessions(ctx, userID)
+	}
+	_, err := s.store.Handle().ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, keepSessionID)
 	return err
 }
 
@@ -289,6 +329,24 @@ const SessionCookieName = "megh_session"
 
 // BearerPrefix is the accepted authorization header scheme.
 const BearerPrefix = "Bearer "
+
+// API token scopes. An empty scope list means the token inherits every right
+// of its owner; once scopes are set they are enforced by the auth middleware.
+const (
+	ScopeRead   = "read"
+	ScopeWrite  = "write"
+	ScopeDeploy = "deploy"
+	ScopeAdmin  = "admin"
+)
+
+// ValidAPIScope reports whether a caller-supplied scope is supported.
+func ValidAPIScope(scope string) bool {
+	switch scope {
+	case ScopeRead, ScopeWrite, ScopeDeploy, ScopeAdmin:
+		return true
+	}
+	return false
+}
 
 // TokenKind identifies which transport a credential arrived on, which is what
 // decides how it should be resolved.

@@ -396,6 +396,24 @@ func (r *AppRepo) CreateVolume(ctx context.Context, v *Volume) error {
 	return nil
 }
 
+// VolumeByID loads one volume record.
+func (r *AppRepo) VolumeByID(ctx context.Context, id string) (*Volume, error) {
+	var v Volume
+	var createdAt string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, target, target_id, name, host_path, mount_path, read_only, created_at
+		   FROM volumes WHERE id = ?`, id).
+		Scan(&v.ID, &v.Target, &v.TargetID, &v.Name, &v.HostPath, &v.MountPath, &v.ReadOnly, &createdAt)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, ErrNotFound
+	case err != nil:
+		return nil, err
+	}
+	v.CreatedAt = Parse(createdAt)
+	return &v, nil
+}
+
 // VolumesByTarget lists a resource's volumes.
 func (r *AppRepo) VolumesByTarget(ctx context.Context, target, targetID string) ([]*Volume, error) {
 	rows, err := r.db.QueryContext(ctx,

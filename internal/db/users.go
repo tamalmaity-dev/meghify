@@ -20,7 +20,7 @@ func (r *UserRepo) CreateUser(ctx context.Context, u *User) error {
 	q := `INSERT INTO users (id, email, password_hash, name, role, totp_secret, totp_enabled, totp_confirmed, created_at, updated_at)
 	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
-		u.ID, u.Email, u.PasswordHash, u.Name, u.Role, u.TOTPSecret, u.TOTPEnabled, u.TOTPEnabled, now, now,
+		u.ID, u.Email, u.PasswordHash, u.Name, u.Role, u.TOTPSecret, u.TOTPEnabled, false, now, now,
 	); err != nil {
 		return fmt.Errorf("insert user: %w", err)
 	}
@@ -92,10 +92,11 @@ func (r *UserRepo) UpdateUserProfile(ctx context.Context, id, name, role string)
 	return rowsAffected(res)
 }
 
-// UpdateUserPassword replaces a password hash and clears TOTP, forcing re-enrolment.
+// UpdateUserPassword replaces a password hash. Two-factor authentication stays
+// enabled: changing a password must not silently weaken the account.
 func (r *UserRepo) UpdateUserPassword(ctx context.Context, id, hash string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET password_hash = ?, totp_secret = '', totp_enabled = 0, updated_at = ? WHERE id = ?`,
+		`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
 		hash, Text(time.Now().UTC()), id)
 	if err != nil {
 		return err
@@ -254,6 +255,17 @@ func (r *UserRepo) TouchAPIToken(ctx context.Context, id string) error {
 // DeleteAPIToken revokes a token.
 func (r *UserRepo) DeleteAPIToken(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
+// DeleteAPITokenForUser revokes a token only when it belongs to userID. It is
+// the object-level check behind DELETE /api/tokens/{id}.
+func (r *UserRepo) DeleteAPITokenForUser(ctx context.Context, id, userID string) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`, id, userID)
 	if err != nil {
 		return err
 	}

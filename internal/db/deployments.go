@@ -169,6 +169,55 @@ func (r *DeploymentRepo) SetDeploymentLogPath(ctx context.Context, id, path stri
 	return rowsAffected(res)
 }
 
+// LogPathsForApplication lists the stored build logs of an application so the
+// caller can remove the files before the rows cascade away.
+func (r *DeploymentRepo) LogPathsForApplication(ctx context.Context, appID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT log_path FROM deployments WHERE application_id = ? AND log_path != ''`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		out = append(out, path)
+	}
+	return out, rows.Err()
+}
+
+// PruneDeploymentsBefore removes deployment history older than cutoff and
+// returns the log files that belonged to it, so the caller can unlink them
+// after the rows are gone.
+func (r *DeploymentRepo) PruneDeploymentsBefore(ctx context.Context, cutoff time.Time) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT log_path FROM deployments WHERE queued_at < ? AND log_path != ''`, Text(cutoff))
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM deployments WHERE queued_at < ?`, Text(cutoff)); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
 // DeleteDeploymentsForApplication clears history when an app is removed.
 func (r *DeploymentRepo) DeleteDeploymentsForApplication(ctx context.Context, appID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM deployments WHERE application_id = ?`, appID)

@@ -23,7 +23,13 @@ const LOCAL_NODE_ID = "local";
 export function NodesPage() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", address: "", sshUser: "root", sshPort: 22 });
+  const [form, setForm] = useState({
+    name: "",
+    address: "",
+    sshUser: "root",
+    sshPort: 22,
+    hostKeyFingerprint: "",
+  });
 
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => api.get<Node[]>("/nodes") });
   const keys = useQuery({ queryKey: ["ssh-keys"], queryFn: () => api.get<{ id: string; fingerprint: string }[]>("/ssh-keys") });
@@ -36,7 +42,7 @@ export function NodesPage() {
       toast.success("Server registered");
       queryClient.invalidateQueries({ queryKey: ["nodes"] });
       setOpen(false);
-      setForm({ name: "", address: "", sshUser: "root", sshPort: 22 });
+      setForm({ name: "", address: "", sshUser: "root", sshPort: 22, hostKeyFingerprint: "" });
     },
     onError: (error) => toast.error(errorText(error)),
   });
@@ -284,6 +290,16 @@ export function NodesPage() {
                 ))}
               </select>
             </div>
+          </div>
+          <div>
+            <Label htmlFor="node-host-key">Host key fingerprint (optional)</Label>
+            <Input
+              id="node-host-key"
+              value={form.hostKeyFingerprint}
+              onChange={(event) => setForm({ ...form, hostKeyFingerprint: event.target.value })}
+              placeholder="SHA256:... — leave empty to pin on first connection"
+              className="font-mono"
+            />
           </div>
           {create.isError && <p className="text-[11px] text-danger">{errorText(create.error)}</p>}
         </div>

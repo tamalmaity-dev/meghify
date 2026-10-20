@@ -22,12 +22,13 @@ const LocalNodeDescription = "This is the server where Meghify is running on. Do
 // CreateNode inserts a server record in the pending state.
 func (r *NodeRepo) CreateNode(ctx context.Context, n *Node) error {
 	now := Text(time.Now().UTC())
-	q := `INSERT INTO nodes (id, name, description, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
-	                         arch, cpus, memory_bytes, docker_version, last_seen_at, error_message, created_at, updated_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	q := `INSERT INTO nodes (id, name, description, address, ssh_port, ssh_user, ssh_key_id, host_key_fingerprint,
+	                         status, os, kernel, arch, cpus, memory_bytes, docker_version, last_seen_at, error_message,
+	                         created_at, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := r.db.ExecContext(ctx, q,
-		n.ID, n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status,
-		n.OS, n.Kernel, n.Arch, n.CPUs, n.MemoryBytes, n.DockerVersion, TextOptional(n.LastSeenAt),
+		n.ID, n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.HostKeyFingerprint,
+		n.Status, n.OS, n.Kernel, n.Arch, n.CPUs, n.MemoryBytes, n.DockerVersion, TextOptional(n.LastSeenAt),
 		n.ErrorMessage, now, now,
 	); err != nil {
 		return fmt.Errorf("insert node: %w", err)
@@ -78,14 +79,15 @@ func (r *NodeRepo) UpdateLocalNodeFacts(ctx context.Context, osName, kernel, arc
 	return nil
 }
 
-const nodeColumns = `id, name, description, address, ssh_port, ssh_user, ssh_key_id, status, os, kernel,
-                     arch, cpus, memory_bytes, docker_version, boot_time, last_seen_at, error_message, created_at, updated_at`
+const nodeColumns = `id, name, description, address, ssh_port, ssh_user, ssh_key_id, host_key_fingerprint,
+                     status, os, kernel, arch, cpus, memory_bytes, docker_version, boot_time, last_seen_at,
+                     error_message, created_at, updated_at`
 
 func (r *NodeRepo) scanNode(scanner interface{ Scan(...any) error }) (*Node, error) {
 	var n Node
 	var sshKeyID, bootTime, lastSeen, createdAt, updatedAt sql.NullString
 	err := scanner.Scan(&n.ID, &n.Name, &n.Description, &n.Address, &n.SSHPort, &n.SSHUser, &sshKeyID,
-		&n.Status, &n.OS, &n.Kernel, &n.Arch, &n.CPUs, &n.MemoryBytes, &n.DockerVersion,
+		&n.HostKeyFingerprint, &n.Status, &n.OS, &n.Kernel, &n.Arch, &n.CPUs, &n.MemoryBytes, &n.DockerVersion,
 		&bootTime, &lastSeen, &n.ErrorMessage, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -132,11 +134,11 @@ func (r *NodeRepo) ListNodes(ctx context.Context) ([]*Node, error) {
 // UpdateNode writes the full mutable node record.
 func (r *NodeRepo) UpdateNode(ctx context.Context, n *Node) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE nodes SET name = ?, description = ?, address = ?, ssh_port = ?, ssh_user = ?, ssh_key_id = ?, status = ?,
-		                  os = ?, kernel = ?, arch = ?, cpus = ?, memory_bytes = ?, docker_version = ?,
-		                  boot_time = ?, last_seen_at = ?, error_message = ?, updated_at = ?
+		`UPDATE nodes SET name = ?, description = ?, address = ?, ssh_port = ?, ssh_user = ?, ssh_key_id = ?,
+		                  host_key_fingerprint = ?, status = ?, os = ?, kernel = ?, arch = ?, cpus = ?, memory_bytes = ?,
+		                  docker_version = ?, boot_time = ?, last_seen_at = ?, error_message = ?, updated_at = ?
 		  WHERE id = ?`,
-		n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.Status,
+		n.Name, n.Description, n.Address, n.SSHPort, n.SSHUser, NullString(n.SSHKeyID), n.HostKeyFingerprint, n.Status,
 		n.OS, n.Kernel, n.Arch, n.CPUs, n.MemoryBytes, n.DockerVersion,
 		TextOptional(n.BootTime), TextOptional(n.LastSeenAt), n.ErrorMessage, Text(time.Now().UTC()), n.ID)
 	if err != nil {
@@ -175,6 +177,17 @@ func (r *NodeRepo) UpdateNodeStatus(ctx context.Context, id, status, errMsg stri
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE nodes SET status = ?, error_message = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`,
 		status, errMsg, Text(lastSeen), Text(time.Now().UTC()), id)
+	if err != nil {
+		return err
+	}
+	return rowsAffected(res)
+}
+
+// SetNodeHostKey pins the SSH host key recorded on first use.
+func (r *NodeRepo) SetNodeHostKey(ctx context.Context, id, fingerprint string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE nodes SET host_key_fingerprint = ?, updated_at = ? WHERE id = ?`,
+		fingerprint, Text(time.Now().UTC()), id)
 	if err != nil {
 		return err
 	}

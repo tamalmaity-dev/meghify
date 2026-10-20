@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
@@ -45,12 +46,14 @@ export function LoginPage() {
       navigate({ to: "/" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.toLowerCase().includes("totp")) {
+      if (err instanceof ApiError && err.code === "totp_required") {
         setNeedsCode(true);
         setError("Enter the code from your authenticator app.");
         return;
       }
-      setError(message);
+      // A code was submitted but rejected: keep the field visible.
+      if (needsCode) setError(message || "That code was not accepted.");
+      else setError(message);
     }
   };
 

@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/tamalmaity-dev/meghify/internal/db"
+	"github.com/tamalmaity-dev/meghify/internal/deploy"
 	"github.com/tamalmaity-dev/meghify/internal/docker"
 )
 
@@ -28,7 +29,7 @@ func (s *Server) terminalSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	container, err := client.ContainerByName(r.Context(), app.Name)
+	container, err := client.ContainerByName(r.Context(), deploy.ContainerName(app))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -38,9 +39,10 @@ func (s *Server) terminalSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // browser requests are same-origin
-	})
+	// Default origin verification: a browser WebSocket must originate from the
+	// same host it connected to. Disabling it let any website a signed-in admin
+	// visited open an authorized shell against this panel.
+	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -78,9 +80,7 @@ func (s *Server) nodeTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // browser requests are same-origin
-	})
+	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}

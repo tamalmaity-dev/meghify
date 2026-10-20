@@ -115,11 +115,11 @@ func TestDynamicConfigYAMLTLS(t *testing.T) {
 
 	for _, want := range []string{
 		"Host(`roopsa-web.example.com`)",
-		"https-roopsa-web-0:",
-		"http-roopsa-web-0:",
+		"https-app-app-1-0:",
+		"http-app-app-1-0:",
 		"certResolver: letsencrypt",
-		"roopsa-web-gzip:",
-		"url: \"http://meghify-roopsa-web:3000\"",
+		"app-app-1-gzip:",
+		"url: \"http://meghify-app-app-1:3000\"",
 		"passHostHeader: true",
 	} {
 		if !strings.Contains(out, want) {
@@ -148,11 +148,11 @@ func TestDynamicConfigYAMLPathAndRobots(t *testing.T) {
 
 	for _, want := range []string{
 		"Host(`panel.example.com`) && PathPrefix(`/api/v3`)",
-		"api-robots-0:",
+		"app-app-1-robots-0:",
 		"X-Robots-Tag: none",
-		"api-redirect-to-https-0:",
+		"app-app-1-redirect-to-https-0:",
 		"scheme: https",
-		"url: \"http://meghify-api:9090\"",
+		"url: \"http://meghify-app-app-1:9090\"",
 		"- http",
 		"- https",
 		"tls:",

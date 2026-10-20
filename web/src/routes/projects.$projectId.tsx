@@ -18,6 +18,8 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "@/lib/api";
+import { displayHost } from "@/lib/utils";
+import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { GitHubAppDialog } from "@/components/github-app-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +34,7 @@ import type {
   GitHubInstallation,
   GitHubRepository,
   GitHubRepositoryList,
+  Node,
   Project,
 } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
@@ -176,6 +179,8 @@ const gitHubWebBase = (app: GitHubApp) => app.baseUrl || "https://github.com";
 export function ProjectDetailPage() {
   const { projectId } = useParams({ from: "/projects/$projectId" });
   const queryClient = useQueryClient();
+  const { user } = useSession();
+  const isAdmin = user?.role === "admin";
 
   const [view, setView] = useState<"resources" | "choose">("resources");
   const [search, setSearch] = useState("");
@@ -191,11 +196,17 @@ export function ProjectDetailPage() {
     dockerfilePath: "Dockerfile",
     compose: "",
     port: 3000,
-    healthCheck: "/",
+    healthCheck: "",
     baseDirectory: "/",
+    nodeId: "",
   });
 
-  const [dbForm, setDbForm] = useState<{ name: string; kind: string; version: string } | null>(null);
+  const [dbForm, setDbForm] = useState<{
+    name: string;
+    kind: string;
+    version: string;
+    nodeId: string;
+  } | null>(null);
   const [credentials, setCredentials] = useState<{ user: string; password: string; port: number } | null>(null);
 
   // GitHub App flow: pick a source (GitHub App), then the account it is
@@ -223,6 +234,11 @@ export function ProjectDetailPage() {
   const environments = useQuery({
     queryKey: ["environments", projectId],
     queryFn: () => api.get<{ id: string; name: string }[]>(`/projects/${projectId}/environments`),
+  });
+  const nodes = useQuery({
+    queryKey: ["nodes"],
+    queryFn: () => api.get<Node[]>("/nodes"),
+    enabled: isAdmin,
   });
   const githubApps = useQuery({
     queryKey: ["github-apps"],
@@ -269,8 +285,9 @@ export function ProjectDetailPage() {
       dockerfilePath: "Dockerfile",
       compose: "",
       port: 3000,
-      healthCheck: "/",
+      healthCheck: "",
       baseDirectory: "/",
+      nodeId: "",
     });
     setAppSource(kind);
   };
@@ -296,8 +313,9 @@ export function ProjectDetailPage() {
       dockerfilePath: "Dockerfile",
       compose: "",
       port: 3000,
-      healthCheck: "/",
+      healthCheck: "",
       baseDirectory: "/",
+      nodeId: "",
     });
     setAppSource("github");
     setGithubStep("configure");
@@ -343,6 +361,7 @@ export function ProjectDetailPage() {
       name: appForm.name.trim(),
       port: appForm.port,
       healthCheck: appForm.healthCheck,
+      nodeId: appForm.nodeId,
     };
     const send = (fields: Record<string, unknown>) =>
       createApplication.mutate({ environmentId, body: { ...body, ...fields } });
@@ -430,10 +449,12 @@ export function ProjectDetailPage() {
             title={project.data?.name ?? "Project"}
             description={project.data?.description || "No description"}
             actions={
-              <Button variant="primary" onClick={() => setView("choose")}>
-                <Plus className="h-4 w-4" />
-                New resource
-              </Button>
+              isAdmin ? (
+                <Button variant="primary" onClick={() => setView("choose")}>
+                  <Plus className="h-4 w-4" />
+                  New resource
+                </Button>
+              ) : undefined
             }
           />
 
@@ -463,11 +484,17 @@ export function ProjectDetailPage() {
             <CardContent className={appList.length === 0 ? "p-0" : "p-3 pt-3"}>
               {appList.length === 0 ? (
                 <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-                  No applications yet —{" "}
-                  <button className="text-brand hover:underline" onClick={() => setView("choose")}>
-                    add a resource
-                  </button>
-                  .
+                  {isAdmin ? (
+                    <>
+                      No applications yet -{" "}
+                      <button className="text-brand hover:underline" onClick={() => setView("choose")}>
+                        add a resource
+                      </button>
+                      .
+                    </>
+                  ) : (
+                    "No applications yet. An administrator can add one."
+                  )}
                 </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -509,11 +536,17 @@ export function ProjectDetailPage() {
             <CardContent className={dbList.length === 0 ? "p-0" : "p-3 pt-3"}>
               {dbList.length === 0 ? (
                 <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-                  No databases yet —{" "}
-                  <button className="text-brand hover:underline" onClick={() => setView("choose")}>
-                    add a resource
-                  </button>
-                  .
+                  {isAdmin ? (
+                    <>
+                      No databases yet -{" "}
+                      <button className="text-brand hover:underline" onClick={() => setView("choose")}>
+                        add a resource
+                      </button>
+                      .
+                    </>
+                  ) : (
+                    "No databases yet. An administrator can add one."
+                  )}
                 </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -637,7 +670,7 @@ export function ProjectDetailPage() {
                           </div>
                           <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
                             {app.configured && app.slug
-                              ? `${gitHubWebBase(app).replace("https://", "")}/apps/${app.slug}`
+                              ? `${displayHost(gitHubWebBase(app))}/apps/${app.slug}`
                               : "Register the app with GitHub to finish"}
                           </div>
                         </div>
@@ -966,16 +999,38 @@ export function ProjectDetailPage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="gh-health">Health check path</Label>
+                    <Label htmlFor="gh-health">Health check path (optional)</Label>
                     <Input
                       id="gh-health"
                       value={appForm.healthCheck}
                       onChange={(event) =>
                         setAppForm({ ...appForm, healthCheck: event.target.value })
                       }
-                      placeholder="/"
+                      placeholder="/health"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="gh-node">Server</Label>
+                  <Select
+                    id="gh-node"
+                    value={appForm.nodeId}
+                    onChange={(event) => setAppForm({ ...appForm, nodeId: event.target.value })}
+                  >
+                    <option value="">This server</option>
+                    {(nodes.data ?? [])
+                      .filter((node) => node.id !== "local")
+                      .map((node) => (
+                        <option key={node.id} value={node.id}>
+                          {node.name}
+                          {node.address ? ` (${node.address})` : ""}
+                        </option>
+                      ))}
+                  </Select>
+                  <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+                    The server cannot be changed after the application is created.
+                  </p>
                 </div>
 
                 <label className="flex items-center gap-2 border-t border-line/40 pt-3 text-[12px] text-black/60 dark:text-white/55">
@@ -1123,7 +1178,7 @@ export function ProjectDetailPage() {
                           size="sm"
                           onClick={() => {
                             setCredentials(null);
-                            setDbForm({ name: "", kind: card.kind, version: "" });
+                            setDbForm({ name: "", kind: card.kind, version: "", nodeId: "" });
                           }}
                         >
                           Create
@@ -1270,14 +1325,33 @@ export function ProjectDetailPage() {
               />
             </div>
             <div>
-              <Label htmlFor="app-health">Health check path</Label>
+              <Label htmlFor="app-health">Health check path (optional)</Label>
               <Input
                 id="app-health"
                 value={appForm.healthCheck}
                 onChange={(event) => setAppForm({ ...appForm, healthCheck: event.target.value })}
-                placeholder="/"
+                placeholder="/health"
               />
             </div>
+          </div>
+
+          <div>
+            <Label htmlFor="app-node">Server</Label>
+            <Select
+              id="app-node"
+              value={appForm.nodeId}
+              onChange={(event) => setAppForm({ ...appForm, nodeId: event.target.value })}
+            >
+              <option value="">This server</option>
+              {(nodes.data ?? [])
+                .filter((node) => node.id !== "local")
+                .map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {node.name}
+                    {node.address ? ` (${node.address})` : ""}
+                  </option>
+                ))}
+            </Select>
           </div>
 
           {environmentId === "" && (
@@ -1320,6 +1394,7 @@ export function ProjectDetailPage() {
                     kind: dbForm.kind,
                     version: dbForm.version.trim() || undefined,
                     environmentId,
+                    nodeId: dbForm.nodeId,
                   })
                 }
               >
@@ -1386,6 +1461,23 @@ export function ProjectDetailPage() {
                   placeholder="default"
                 />
               </div>
+            </div>
+            <div>
+              <Label htmlFor="db-node">Server</Label>
+              <Select
+                id="db-node"
+                value={dbForm?.nodeId ?? ""}
+                onChange={(event) => dbForm && setDbForm({ ...dbForm, nodeId: event.target.value })}
+              >
+                <option value="">This server</option>
+                {(nodes.data ?? [])
+                  .filter((node) => node.id !== "local")
+                  .map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.name}
+                    </option>
+                  ))}
+              </Select>
             </div>
             {createDatabase.isError && (
               <p className="text-[11px] text-danger">{errorText(createDatabase.error)}</p>
