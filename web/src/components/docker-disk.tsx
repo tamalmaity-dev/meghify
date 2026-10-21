@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HardDrive, RefreshCw, Trash2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
@@ -12,11 +13,11 @@ import type { DockerCleanupResult, DockerDiskUsage, DockerUsageItem } from "@/li
  * The Docker side of the disk the STORAGE tile counts: what the engine holds
  * in images, containers, volumes and build cache, what the build sandbox's
  * own daemon adds, and the objects that dominate each. `docker system df`
- * walks the stores for this, so the card refreshes on the minute and reloads
- * manually instead of every tick.
+ * walks the stores for this and can spike CPU on a small node, so the server
+ * caches a measurement for fifteen minutes; Refresh always forces a new scan.
  */
 
-const REFETCH_MS = 60_000;
+const REFETCH_MS = 15 * 60_000;
 
 const IMAGES_COLOR = "#a78bfa";
 const CONTAINERS_COLOR = "#fbbf24";
@@ -33,11 +34,21 @@ const kindLabel: Record<DockerUsageItem["kind"], string> = {
 
 export function DockerDiskUsage() {
   const queryClient = useQueryClient();
+  const forceNext = useRef(false);
   const usage = useQuery({
     queryKey: ["docker-df"],
-    queryFn: () => api.get<DockerDiskUsage>("/docker/df"),
+    queryFn: () => api.get<DockerDiskUsage>(`/docker/df${forceNext.current ? "?fresh=1" : ""}`),
     refetchInterval: REFETCH_MS,
   });
+
+  const refresh = async () => {
+    forceNext.current = true;
+    try {
+      await usage.refetch();
+    } finally {
+      forceNext.current = false;
+    }
+  };
 
   const cleanup = useMutation({
     mutationFn: () => api.post<DockerCleanupResult>("/docker/cleanup"),
@@ -56,6 +67,9 @@ export function DockerDiskUsage() {
   const engine = usage.data?.engine;
   const sandbox = usage.data?.sandbox;
   const top = usage.data?.top ?? [];
+  const sampledAt = usage.data?.sampledAt
+    ? new Date(usage.data.sampledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
 
   if (usage.isError) {
     return (
@@ -86,7 +100,9 @@ export function DockerDiskUsage() {
     <section className="mb-4">
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="text-[13px] font-semibold tracking-tight">Docker storage</h2>
-        <span className="text-[11px] text-black/40 dark:text-white/35">refreshes every minute</span>
+        <span className="text-[11px] text-black/40 dark:text-white/35">
+          {sampledAt ? `measured ${sampledAt} · ` : ""}refreshes every 15 min
+        </span>
       </div>
 
       <Card>
@@ -170,7 +186,7 @@ export function DockerDiskUsage() {
                     variant="ghost"
                     size="sm"
                     disabled={usage.isFetching}
-                    onClick={() => void usage.refetch()}
+                    onClick={() => void refresh()}
                   >
                     <RefreshCw className={cn("h-3.5 w-3.5", usage.isFetching && "animate-spin")} />
                     Refresh

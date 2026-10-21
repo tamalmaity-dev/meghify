@@ -264,6 +264,7 @@ export interface DockerDiskUsage {
   engine: DockerUsageReport;
   top: DockerUsageItem[];
   sandbox?: DockerSandboxUsage;
+  sampledAt: string;
 }
 
 /** What the built-in cleanup pass reclaimed, in bytes. */

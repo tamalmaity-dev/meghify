@@ -168,6 +168,22 @@ func TestSelectRepoExceptionsKeepsCurrentHelper(t *testing.T) {
 	}
 }
 
+// Before v0.3.1 the panel used Coolify's helper image. Cleanup removes its
+// tags too, while still refusing anything a container references.
+func TestSelectRepoExceptionsFindsRetiredCoolifyHelper(t *testing.T) {
+	base := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-coolify", "coollabsio/coolify-helper", "1.0.17", base.Add(-48*time.Hour), 621<<20),
+		summary("id-helper", "ghcr.io/tamalmaity-dev/meghify-helper", "v0.7.0", base, 276<<20),
+		summary("id-app", "meghify.local/roopsa-web", "bf50f017-1", base, 2<<30),
+	}
+
+	victims := selectRepoExceptions(images, "coollabsio/coolify-helper", "")
+	if len(victims) != 1 || victims[0].Tags[0] != "coollabsio/coolify-helper:1.0.17" {
+		t.Fatalf("victims = %+v, want only the retired Coolify helper", victims)
+	}
+}
+
 // The helper sweep only touches the helper repository: application release
 // images, the sandbox image and other registries are out of scope.
 func TestSelectRepoExceptionsScopedToRepository(t *testing.T) {

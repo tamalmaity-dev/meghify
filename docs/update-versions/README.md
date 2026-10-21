@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.7.1](0.7.1.md) | 2026-10-21 | Cached dashboard Docker measurements (no routine `system/df` CPU spikes), retired Coolify helper cleanup, memory provenance note |
 | [0.7.0](0.7.0.md) | 2026-10-21 | Security hardening, admin/API-token scopes, SSH host-key pinning, remote-node operations, ID-stable names and named volumes |
 | [0.6.4](0.6.4.md) | 2026-10-18 | Build-cache bound enforced after every release, superseded helper images removed by cleanup |
 | [0.6.3](0.6.3.md) | 2026-10-18 | Docker disk usage breakdown (engine + build sandbox), per-app image retention, bounded build cache, release-time image trim |

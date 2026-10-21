@@ -25,6 +25,10 @@ import (
 	"github.com/tamalmaity-dev/meghify/internal/docker"
 )
 
+// retiredHelperRepos are images the panel itself used before switching to its
+// own build helper. They are safe to drop when no container references them.
+var retiredHelperRepos = []string{"coollabsio/coolify-helper"}
+
 // CleanupResult reports what one cleanup pass reclaimed.
 type CleanupResult struct {
 	Reclaimed     int64 `json:"reclaimed"`
@@ -65,11 +69,27 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 	// repository is entirely the panel's, so every other tag can go. The
 	// in-use one is protected and the engine refuses deletions under live
 	// containers anyway.
-	if repo := docker.RepoOf(helperImage); repo != "" {
-		if bytes, _, err := client.PruneRepoExcept(ctx, repo, helperImage); err != nil {
+	pruneRepo := func(repo, keep string) {
+		if repo == "" {
+			return
+		}
+		bytes, removed, err := client.PruneRepoExcept(ctx, repo, keep)
+		if err != nil {
 			errs = append(errs, err)
-		} else {
-			result.Reclaimed += bytes
+			return
+		}
+		result.Reclaimed += bytes
+		result.ImagesRemoved += int64(removed)
+	}
+	currentHelperRepo := docker.RepoOf(helperImage)
+	pruneRepo(currentHelperRepo, helperImage)
+	// Releases before v0.3.1 used Coolify's helper image. Its layers live in a
+	// different repository, so the sweep above never reclaimed them. Removing
+	// the tags is safe even on a host that also runs Coolify: the engine
+	// refuses to remove an image referenced by a running or stopped container.
+	for _, repo := range retiredHelperRepos {
+		if repo != currentHelperRepo {
+			pruneRepo(repo, "")
 		}
 	}
 

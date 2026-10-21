@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +40,15 @@ type Server struct {
 	spa      *SPAHandler
 	logger   *slog.Logger
 	started  time.Time
+
+	// Docker's disk-usage endpoint walks every image, volume and build-cache
+	// record in the engine; on a small VPS that is a visible CPU spike. The
+	// dashboard keeps the answer for a few minutes and the manual refresh
+	// bypasses the cache.
+	dockerUsageMu     sync.Mutex
+	dockerUsageLoadMu sync.Mutex
+	dockerUsage       *dockerDiskUsagePayload
+	dockerUsageAt     time.Time
 }
 
 // Options builds a Server.
