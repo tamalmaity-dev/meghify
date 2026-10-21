@@ -123,6 +123,10 @@ type Pipeline struct {
 	// sandboxMode is auto, on or off; sandboxImage defaults to Docker-in-Docker.
 	sandboxMode  string
 	sandboxImage string
+	// nodeID is set on the per-node clone; sandboxLastUsed is shared by every
+	// clone so the idle sweep can stop a daemon no deployment is using.
+	nodeID          string
+	sandboxLastUsed map[string]time.Time
 	// deployTimeout bounds one whole deployment.
 	deployTimeout time.Duration
 	// imageKeep drives the post-release image trim: keep N newest images per
@@ -184,6 +188,7 @@ func NewPipeline(opts Options) *Pipeline {
 		running:            map[string]struct{}{},
 		cancel:             map[string]context.CancelFunc{},
 		helpers:            map[string]map[string]*docker.Client{},
+		sandboxLastUsed:    map[string]time.Time{},
 	}
 }
 
@@ -195,6 +200,7 @@ func NewPipeline(opts Options) *Pipeline {
 // failed instead of leaving it queued forever.
 func (p *Pipeline) forNode(ctx context.Context, nodeID string) *Pipeline {
 	clone := *p
+	clone.nodeID = nodeID
 	if p.clientFor == nil {
 		return &clone
 	}

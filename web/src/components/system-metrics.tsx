@@ -152,6 +152,7 @@ export function SystemMetrics({ nodeId = "local" }: { nodeId?: string }) {
       <p className="mt-2 text-[11px] leading-relaxed text-black/40 dark:text-white/35">
         Memory is host-wide: it includes the panel, Docker, the build sandbox, the proxy and every
         application. Docker images and build cache count toward storage, not this memory figure.
+        An idle build sandbox is stopped automatically and starts again on the next deployment.
       </p>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">

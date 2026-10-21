@@ -63,6 +63,12 @@ panel ──> helper container ──> build sandbox (meghify-buildd, limited CP
 - `BUILD_SANDBOX` selects the behavior: `auto` (default) falls back to
   the legacy socket-mounted helper when nested Docker is not permitted, `on`
   makes a sandbox failure an error, `off` disables the sandbox entirely.
+- **An idle sandbox is stopped automatically.** `BUILD_SANDBOX_IDLE_TIMEOUT`
+  (default **15m**) measures build inactivity; after that the panel stops the
+  sandbox container, releasing the Docker daemon's memory. The panel also stops
+  it at startup, when no build can be running. The next deployment starts it
+  again and reuses the `meghify-build-cache` volume, so the first build after
+  an idle period is not a cold build. Set `0` to keep it running continuously.
 - **Builds can reach sibling services by name.** A build process cannot use
   user-defined-network DNS (there is no network attached to a build), so
   `next build` running against a database service would fail to resolve its
@@ -127,13 +133,19 @@ quietly. These guards keep it in check:
   repository is cut down to the `IMAGE_KEEP` (default **1**) newest tags. The
   image the running container serves from is always protected; the engine
   refuses anything else in use, which fails the sweep harmlessly. Only images
-  stamped by this panel (`meghify.application`) are swept, so an operator's
-  own images on the same engine are left alone.
+  stamped by this panel (`meghify.application`) or tags in an application
+  repository the panel has already stamped are swept, so an unrelated image
+  on the same engine is left alone.
 - **Bounded build cache** — `BUILD_CACHE_KEEP` (default **8g**) caps the
   Docker build cache, on the engine and inside the build sandbox. The bound is
   enforced right after every release, not only at cleanup time, and a prune
   keeps the most recently used records first (nixpacks' `--cache-key` mounts
   survive as long as they fit the bound). `0` disables the bound.
+- **Orphaned application state is reclaimed** - cleanup removes application
+  containers whose `meghify.application` label points at a deleted record. It
+  does this before the image sweep, so a stopped container cannot protect its
+  old image forever. A nil application list (database unavailable) skips the
+  pass instead of treating everything as deleted.
 - **Superseded helpers die with the release** — images from the helper
   repository that do not match the running panel's helper (older
   `meghify-helper:v0.6.x` tags after an upgrade) are removed by every cleanup

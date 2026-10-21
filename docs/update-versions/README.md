@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.7.3](0.7.3.md) | 2026-10-21 | Stop the idle build sandbox to release memory, reclaim orphaned application images, and remove every Meghify Docker resource on uninstall |
 | [0.7.2](0.7.2.md) | 2026-10-21 | Remove superseded application and proxy images automatically; only panel-built images are swept, current containers stay protected |
 | [0.7.1](0.7.1.md) | 2026-10-21 | Cached dashboard Docker measurements (no routine `system/df` CPU spikes), retired Coolify helper cleanup, memory provenance note |
 | [0.7.0](0.7.0.md) | 2026-10-21 | Security hardening, admin/API-token scopes, SSH host-key pinning, remote-node operations, ID-stable names and named volumes |

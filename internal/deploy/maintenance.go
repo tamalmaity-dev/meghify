@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/docker/docker/api/types/image"
 	units "github.com/docker/go-units"
 
 	"github.com/tamalmaity-dev/meghify/internal/docker"
@@ -33,6 +34,10 @@ var retiredHelperRepos = []string{"coollabsio/coolify-helper"}
 type CleanupResult struct {
 	Reclaimed     int64 `json:"reclaimed"`
 	ImagesRemoved int64 `json:"imagesRemoved"`
+	// OrphanedContainers counts application containers whose database row is
+	// gone. They are removed before the image sweep so their old image can be
+	// reclaimed in the same pass.
+	OrphanedContainers int64 `json:"orphanedContainers,omitempty"`
 	// Sandbox says whether the build sandbox took part (it does not run in
 	// some setups, e.g. BUILD_SANDBOX=off).
 	Sandbox bool `json:"sandbox"`
@@ -44,13 +49,27 @@ type CleanupResult struct {
 // helper and proxy image versions. Failures are joined into the returned error
 // while every remaining step still runs, so a sandbox hiccup cannot block an
 // engine cleanup.
-func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, imageKeep int, cacheKeep int64, helperImage, proxyImage string) (CleanupResult, error) {
+func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, knownApps map[string]struct{}, imageKeep int, cacheKeep int64, helperImage, proxyImage string) (CleanupResult, error) {
 	var result CleanupResult
 	if client == nil {
 		return result, nil
 	}
 
 	var errs []error
+
+	// A deleted application can leave a stopped container behind when the
+	// engine was unreachable during teardown. That container protects its old
+	// image from the retention sweep forever. Remove both before considering
+	// retention; a nil map means the caller could not read the application
+	// list, so this pass is skipped rather than treating every app as gone.
+	if knownApps != nil {
+		containers, images, err := PruneOrphanedApplications(ctx, client, knownApps, protect)
+		result.OrphanedContainers = int64(containers)
+		result.ImagesRemoved += int64(images)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 
 	if bytes, err := client.PruneImages(ctx); err != nil {
 		errs = append(errs, err)
@@ -62,7 +81,7 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 		errs = append(errs, err)
 	} else {
 		result.Reclaimed += bytes
-		result.ImagesRemoved = int64(removed)
+		result.ImagesRemoved += int64(removed)
 	}
 
 	// Older helper versions are obsolete the moment the panel upgrades; the
@@ -115,6 +134,89 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 	}
 
 	return result, errors.Join(errs...)
+}
+
+// PruneOrphanedApplications removes application containers and images whose
+// meghify.application label points at a record that no longer exists. It is
+// intentionally bounded to panel-labelled resources: unrelated engine state is
+// never touched. Passing a nil known set would be dangerous, so callers that
+// cannot read the database skip the pass entirely.
+func PruneOrphanedApplications(ctx context.Context, client *docker.Client, known map[string]struct{}, protect map[string]struct{}) (int, int, error) {
+	if client == nil || known == nil {
+		return 0, 0, nil
+	}
+	var errs []error
+	removedContainers := 0
+	removedImages := 0
+
+	containers, err := client.ListContainers(ctx, "", "")
+	if err != nil {
+		errs = append(errs, fmt.Errorf("list application containers: %w", err))
+	} else {
+		for _, container := range selectOrphanedContainers(containers, known) {
+			_ = client.StopContainer(ctx, container.ID, 20*time.Second)
+			if err := client.RemoveContainer(ctx, container.ID); err != nil {
+				errs = append(errs, fmt.Errorf("remove orphaned container %s: %w", container.Name, err))
+				continue
+			}
+			if protect != nil && container.Image != "" {
+				delete(protect, container.Image)
+			}
+			removedContainers++
+		}
+	}
+
+	images, err := client.ListImages(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("list application images: %w", err))
+		return removedContainers, removedImages, errors.Join(errs...)
+	}
+	for _, summary := range selectOrphanedImages(images, known) {
+		refs := summary.RepoTags
+		if len(refs) == 0 {
+			refs = []string{summary.ID}
+		}
+		ok := true
+		for _, ref := range refs {
+			if err := client.RemoveImage(ctx, ref); err != nil {
+				ok = false
+			}
+		}
+		if ok {
+			removedImages++
+		}
+	}
+	return removedContainers, removedImages, errors.Join(errs...)
+}
+
+func selectOrphanedContainers(containers []*docker.ContainerInfo, known map[string]struct{}) []*docker.ContainerInfo {
+	out := make([]*docker.ContainerInfo, 0)
+	for _, container := range containers {
+		appID := container.Labels["meghify.application"]
+		if appID == "" {
+			continue
+		}
+		if _, ok := known[appID]; ok {
+			continue
+		}
+		out = append(out, container)
+	}
+	return out
+}
+
+func selectOrphanedImages(images []image.Summary, known map[string]struct{}) []image.Summary {
+	out := make([]image.Summary, 0)
+	for _, summary := range images {
+		appID := summary.Labels["meghify.application"]
+		if appID == "" {
+			continue
+		}
+		if _, ok := known[appID]; ok {
+			continue
+		}
+		out = append(out, summary)
+	}
+	return out
 }
 
 // sandboxManaged is the engine-side container name of the build sandbox.

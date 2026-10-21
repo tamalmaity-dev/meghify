@@ -89,6 +89,11 @@ type Config struct {
 	// on makes that an error; off disables the sandbox.
 	BuildSandbox      string `env:"BUILD_SANDBOX" envDefault:"auto"`
 	BuildSandboxImage string `env:"BUILD_SANDBOX_IMAGE" envDefault:"docker:29-dind"`
+	// BuildSandboxIdle stops the Docker-in-Docker sandbox after this much
+	// inactivity. The daemon and its cache metadata are a large part of a
+	// small node's idle memory; the next deployment starts it again. Zero
+	// keeps it running between builds.
+	BuildSandboxIdle time.Duration `env:"BUILD_SANDBOX_IDLE_TIMEOUT" envDefault:"15m"`
 
 	// BuildDefaultNodeVersion is passed to nixpacks when the application does
 	// not set NIXPACKS_NODE_VERSION itself. Node 18 is end-of-life, but it is

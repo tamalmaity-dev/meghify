@@ -4,7 +4,41 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/docker/docker/api/types/image"
+
+	"github.com/tamalmaity-dev/meghify/internal/docker"
 )
+
+// A deleted application can leave a stopped container whose image then looks
+// protected forever. Only containers whose label points at a missing record
+// are orphans; a live app and a non-application container always survive.
+func TestSelectOrphanedApplicationContainers(t *testing.T) {
+	containers := []*docker.ContainerInfo{
+		{ID: "live", Labels: map[string]string{"meghify.application": "app-live"}},
+		{ID: "orphan", Labels: map[string]string{"meghify.application": "app-gone"}},
+		{ID: "other", Labels: map[string]string{"meghify.database": "db-1"}},
+		{ID: "unlabelled"},
+	}
+	known := map[string]struct{}{"app-live": {}}
+	orphans := selectOrphanedContainers(containers, known)
+	if len(orphans) != 1 || orphans[0].ID != "orphan" {
+		t.Fatalf("orphans = %+v, want only the deleted application's container", orphans)
+	}
+}
+
+func TestSelectOrphanedApplicationImages(t *testing.T) {
+	images := []image.Summary{
+		{ID: "live", Labels: map[string]string{"meghify.application": "app-live"}},
+		{ID: "orphan", Labels: map[string]string{"meghify.application": "app-gone"}},
+		{ID: "foreign", Labels: map[string]string{"org.opencontainers.image.title": "other"}},
+	}
+	known := map[string]struct{}{"app-live": {}}
+	orphans := selectOrphanedImages(images, known)
+	if len(orphans) != 1 || orphans[0].ID != "orphan" {
+		t.Fatalf("orphans = %+v, want only the deleted application's image", orphans)
+	}
+}
 
 func TestParseHumanSize(t *testing.T) {
 	// The CLI's decimal sizes go through a float; allow a byte of rounding.

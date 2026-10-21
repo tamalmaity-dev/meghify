@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"time"
 
@@ -41,6 +42,7 @@ func (p *Pipeline) ensureSandbox(ctx context.Context, sink io.Writer) (*sandboxI
 	if p.client == nil || p.sandboxImage == "" {
 		return nil, errors.New("build sandbox is not configured")
 	}
+	p.markSandboxUsed()
 	if _, err := p.client.EnsureNetwork(ctx, sandboxNetworkName, false); err != nil {
 		return nil, fmt.Errorf("sandbox network: %w", err)
 	}
@@ -102,10 +104,139 @@ func (p *Pipeline) ensureSandbox(ctx context.Context, sink io.Writer) (*sandboxI
 	if err := p.waitSandbox(ctx, sink, dockerName, 120*time.Second); err != nil {
 		return nil, err
 	}
+	p.markSandboxUsed()
 	return &sandboxInfo{
 		Endpoint: "tcp://" + dockerName + ":" + strconv.Itoa(sandboxPort),
 		Network:  sandboxNetworkName,
 	}, nil
+}
+
+// markSandboxUsed records that a deployment needs the sandbox. The timestamp
+// is shared by every per-node pipeline view; the idle sweep reads it.
+func (p *Pipeline) markSandboxUsed() {
+	if p == nil || p.mu == nil {
+		return
+	}
+	nodeID := p.nodeID
+	if nodeID == "" {
+		nodeID = "local"
+	}
+	p.mu.Lock()
+	if p.sandboxLastUsed == nil {
+		p.sandboxLastUsed = map[string]time.Time{}
+	}
+	p.sandboxLastUsed[nodeID] = time.Now()
+	p.mu.Unlock()
+}
+
+// StopAllSandboxes stops every build sandbox on every node. Startup calls this
+// after interrupted deployments are reconciled: no build is running yet, and
+// the next deployment starts the daemon again on demand.
+func (p *Pipeline) StopAllSandboxes(ctx context.Context) (int, error) {
+	return p.stopSandboxes(ctx, 0, true)
+}
+
+// StopIdleSandboxes stops sandboxes that have been unused for idle. Set idle
+// to zero to disable the sweep. The build cache volume is never touched.
+func (p *Pipeline) StopIdleSandboxes(ctx context.Context, idle time.Duration) (int, error) {
+	if idle <= 0 {
+		return 0, nil
+	}
+	return p.stopSandboxes(ctx, idle, false)
+}
+
+func (p *Pipeline) stopSandboxes(ctx context.Context, idle time.Duration, all bool) (int, error) {
+	if p == nil || p.store == nil || p.sandboxMode == "off" {
+		return 0, nil
+	}
+	p.mu.Lock()
+	if len(p.running) > 0 {
+		p.mu.Unlock()
+		return 0, nil
+	}
+	p.mu.Unlock()
+
+	nodes, err := p.store.Nodes.ListNodes(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// Local first: an offline remote node must not consume the startup
+	// deadline before the sandbox on this panel's own engine is stopped.
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return nodes[i] != nil && nodes[i].ID == "local" &&
+			(nodes[j] == nil || nodes[j].ID != "local")
+	})
+
+	stopped := 0
+	var errs []error
+	for _, n := range nodes {
+		if n == nil || n.ID == "" {
+			continue
+		}
+		p.mu.Lock()
+		if len(p.running) > 0 {
+			p.mu.Unlock()
+			break
+		}
+		last := p.sandboxLastUsed[n.ID]
+		p.mu.Unlock()
+		if !all && !sandboxIdleExpired(last, time.Now(), idle) {
+			continue
+		}
+
+		client := p.client
+		if p.clientFor != nil {
+			resolved, resolveErr := p.clientFor(ctx, n.ID)
+			if resolveErr != nil {
+				errs = append(errs, fmt.Errorf("resolve node %s: %w", n.ID, resolveErr))
+				continue
+			}
+			client = resolved
+		} else if n.ID != "local" {
+			continue
+		}
+		if client == nil {
+			continue
+		}
+		container, err := client.ContainerByName(ctx, sandboxName)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("find sandbox on %s: %w", n.ID, err))
+			continue
+		}
+		if container == nil || container.State != "running" {
+			p.mu.Lock()
+			delete(p.sandboxLastUsed, n.ID)
+			p.mu.Unlock()
+			continue
+		}
+
+		// Hold the shared mutex across the stop so Run cannot claim the
+		// sandbox between the activity check and the stop.
+		p.mu.Lock()
+		if len(p.running) > 0 {
+			p.mu.Unlock()
+			break
+		}
+		last = p.sandboxLastUsed[n.ID]
+		if !all && !sandboxIdleExpired(last, time.Now(), idle) {
+			p.mu.Unlock()
+			continue
+		}
+		stopErr := client.StopContainer(ctx, container.ID, 20*time.Second)
+		if stopErr == nil {
+			delete(p.sandboxLastUsed, n.ID)
+			stopped++
+		}
+		p.mu.Unlock()
+		if stopErr != nil {
+			errs = append(errs, fmt.Errorf("stop sandbox on %s: %w", n.ID, stopErr))
+		}
+	}
+	return stopped, errors.Join(errs...)
+}
+
+func sandboxIdleExpired(last, now time.Time, idle time.Duration) bool {
+	return !last.IsZero() && now.Sub(last) >= idle
 }
 
 // waitSandbox polls `docker info` inside the sandbox until the daemon answers.

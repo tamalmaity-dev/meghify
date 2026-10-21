@@ -140,7 +140,22 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 			}
 		}
 	}
-	result, err := deploy.CleanupEngine(ctx, client, protect, cfg.ImageKeep, cfg.BuildCacheKeepBytes(), cfg.EffectiveHelperImage(), cfg.ProxyImage)
+	knownApps := map[string]struct{}{}
+	if apps, err := store.Applications.ListApplications(ctx); err != nil {
+		// A database hiccup must not turn every application container into an
+		// orphan. Skip that part of the pass and let the next run retry.
+		knownApps = nil
+		if logger != nil {
+			logger.Warn("could not list applications for orphan cleanup", "error", err)
+		}
+	} else {
+		for _, app := range apps {
+			if app != nil {
+				knownApps[app.ID] = struct{}{}
+			}
+		}
+	}
+	result, err := deploy.CleanupEngine(ctx, client, protect, knownApps, cfg.ImageKeep, cfg.BuildCacheKeepBytes(), cfg.EffectiveHelperImage(), cfg.ProxyImage)
 	if (result.Reclaimed > 0 || result.ImagesRemoved > 0) && logger != nil {
 		logger.Info("docker cleanup reclaimed storage",
 			"bytes", result.Reclaimed, "images", result.ImagesRemoved, "sandbox", result.Sandbox)

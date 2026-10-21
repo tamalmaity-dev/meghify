@@ -58,6 +58,33 @@ func TestSelectManagedImagesOnlyPanelBuilds(t *testing.T) {
 	}
 }
 
+// A tag left in an application's repository without the label (an old panel
+// build, or an app deleted and recreated under the same name) is still that
+// application's image. It must be swept, while a label-less repository the
+// panel never stamped stays foreign.
+func TestSelectManagedImagesIncludesUnlabelledTagsInManagedRepo(t *testing.T) {
+	base := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		managedSummary("id-new", "meghify.local/roopsa-web", "5226b772-2", base, 2<<30),
+		summary("id-old-unlabelled", "meghify.local/roopsa-web", "bf50f017-1", base.Add(-60*time.Hour), 2<<30),
+		summary("id-foreign", "example/other", "latest", base, 1<<30),
+	}
+
+	managed := selectManagedImages(images, "")
+	if len(managed) != 2 {
+		t.Fatalf("managed = %+v, want the labelled image and the old tag in its repository", managed)
+	}
+	victims := selectReposToPrune(managed, 1, nil)
+	if len(victims) != 1 || victims[0].Tags[0] != "meghify.local/roopsa-web:bf50f017-1" {
+		t.Fatalf("victims = %+v, want only the old unlabelled application tag", victims)
+	}
+	for _, victim := range victims {
+		if victim.Tags[0] == "example/other:latest" {
+			t.Fatal("an unlabelled image outside a managed repository leaked into the sweep")
+		}
+	}
+}
+
 // Each build tags a fresh stamp, so the repository grows one image per build:
 // keep must retain the newest and drop older ones, oldest first.
 func TestSelectReposToPruneKeepsNewest(t *testing.T) {

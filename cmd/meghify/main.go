@@ -221,6 +221,17 @@ func run() error {
 	}
 	recoverDone()
 
+	// The sandbox is only needed while a build is running. Reconcile left no
+	// build in flight, so stop any daemon the previous panel process left
+	// behind instead of carrying its memory until the next deployment.
+	sandboxCtx, sandboxDone := context.WithTimeout(context.Background(), 30*time.Second)
+	if stopped, err := pipeline.StopAllSandboxes(sandboxCtx); err != nil {
+		logger.Warn("could not stop idle build sandboxes", "error", err)
+	} else if stopped > 0 {
+		logger.Info("stopped idle build sandbox", "count", stopped)
+	}
+	sandboxDone()
+
 	runner.Start(ctx)
 
 	// Domain routing lives in the proxy's dynamic configuration files. Rewrite
@@ -327,6 +338,18 @@ func registerJobs(
 			collectRemoteMetrics(remoteCtx, store, nodes, resolveClient, logger)
 		}()
 	})
+	if cfg.BuildSandboxIdle > 0 {
+		runner.RegisterCronFunc("@every 5m", func(ctx context.Context) {
+			sweepCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+			stopped, err := pipeline.StopIdleSandboxes(sweepCtx, cfg.BuildSandboxIdle)
+			if err != nil {
+				logger.Warn("idle build sandbox sweep failed", "error", err)
+			} else if stopped > 0 {
+				logger.Info("stopped idle build sandbox", "count", stopped)
+			}
+		})
+	}
 	runner.RegisterCron("@every 1h", db.JobGC, "")
 
 	// One cleanup pass shortly after boot. Retention windows and the queue prune

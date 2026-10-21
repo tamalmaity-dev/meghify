@@ -85,7 +85,7 @@ install.sh --uninstall [--yes] | --update | --version
 | Argument | Meaning |
 |---|---|
 | *(none)* / `install` | install the latest release as a systemd service |
-| `--uninstall` | stop the panel, remove its data, unit file and CLI |
+| `--uninstall` | stop the panel and remove its data, unit file, CLI and every Docker resource it created |
 | `--update` | fetch the newest release and restart (with health-check rollback) |
 | `--version` | report installer stamp, binary version, running version, latest release |
 | `--from-source` | skip releases: clone and build on the host (systemd mode) |
@@ -188,17 +188,33 @@ meghify uninstall --yes     # non-interactive
 curl -fsSL .../install.sh | bash -s -- --uninstall --yes
 ```
 
+This is destructive: application data, database volumes, proxy certificates
+and build cache are removed. Take a backup before running it.
+
 Removed:
 
 - the `meghify.service` unit and its `journalctl` entries
 - `$PANEL_DIR` including `.env`, the data directory and `repo/`
 - `/usr/local/bin/meghify`
-- compose project containers + the `meghify-data` volume (Docker mode)
+- the panel's Compose project (including the `meghify-data` volume)
+- every container created by Meghify: applications, databases, services,
+  proxy, build sandbox, terminal helper and build helpers
+- every Compose stack created for applications and services
+- every Meghify-managed and Compose-project volume: application data, database
+  data, the `meghify-build-cache` volume, proxy routing config and certificates
+- every Meghify-managed and application/service network
+- application images stamped with `meghify.application`, including old release
+  tags, plus the panel, helper, proxy, sandbox and terminal images
+- the Docker build cache
 
 Kept:
 
-- the Docker engine itself, other projects' images and containers
-- any reverse-proxy configs outside Meghify's `meghify.*` labels
+- the Docker engine itself and its daemon configuration
+- containers, images, volumes and networks that are not linked to Meghify
+- unrelated projects and reverse-proxy configuration outside Meghify's labels
+
+The result is effectively a fresh Docker host for this panel: the next install
+does not inherit Meghify's old applications, images, volumes or build cache.
 
 `--uninstall` refuses in a non-interactive pipe unless `--yes` is passed, so a
 bare `curl | bash -s -- --uninstall` can never nudge the server by accident.

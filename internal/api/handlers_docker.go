@@ -130,8 +130,19 @@ func (s *Server) dockerCleanup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	knownApps := map[string]struct{}{}
+	if apps, err := s.store.Applications.ListApplications(r.Context()); err != nil {
+		knownApps = nil
+		s.logger.Warn("could not list applications for orphan cleanup", "error", err)
+	} else {
+		for _, app := range apps {
+			if app != nil {
+				knownApps[app.ID] = struct{}{}
+			}
+		}
+	}
 
-	result, err := deploy.CleanupEngine(r.Context(), s.docker, protect, s.cfg.ImageKeep, s.cfg.BuildCacheKeepBytes(), s.cfg.EffectiveHelperImage(), s.cfg.ProxyImage)
+	result, err := deploy.CleanupEngine(r.Context(), s.docker, protect, knownApps, s.cfg.ImageKeep, s.cfg.BuildCacheKeepBytes(), s.cfg.EffectiveHelperImage(), s.cfg.ProxyImage)
 	s.clearDockerUsageCache()
 	if result.Reclaimed > 0 || result.ImagesRemoved > 0 {
 		s.logger.Info("manual docker cleanup reclaimed storage",

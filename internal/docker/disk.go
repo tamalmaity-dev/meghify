@@ -172,12 +172,35 @@ func (c *Client) PruneManagedImages(ctx context.Context, repo string, keep int, 
 // selectManagedImages limits a retention sweep to images the panel built.
 // Foreign images on the same engine (Traefik, Docker CLI, a developer's own
 // builds) are deliberately excluded; the proxy and retired helper
-// repositories have their own narrow sweeps. An empty repo means every
-// application repository.
+// repositories have their own narrow sweeps. An image without the label is
+// still included when it lives in a repository the panel has stamped: older
+// releases and an application deleted/recreated under the same name can leave
+// untagged-by-label tags behind, and the repository is the application's own.
+// An empty repo means every application repository.
 func selectManagedImages(images []image.Summary, repo string) []image.Summary {
-	managed := make([]image.Summary, 0, len(images))
+	managedRepos := map[string]struct{}{}
 	for _, summary := range images {
 		if summary.Labels[managedApplicationLabel] == "" {
+			continue
+		}
+		for _, tag := range summary.RepoTags {
+			if name := repoOf(tag); name != "" {
+				managedRepos[name] = struct{}{}
+			}
+		}
+	}
+	managed := make([]image.Summary, 0, len(images))
+	for _, summary := range images {
+		managedImage := summary.Labels[managedApplicationLabel] != ""
+		if !managedImage {
+			for _, tag := range summary.RepoTags {
+				if _, ok := managedRepos[repoOf(tag)]; ok {
+					managedImage = true
+					break
+				}
+			}
+		}
+		if !managedImage {
 			continue
 		}
 		if repo == "" || imageInRepo(summary, repo) {

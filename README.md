@@ -169,7 +169,8 @@ Commands and flags (also passable through the pipe with `bash -s --`):
 
 ```bash
 install.sh          install the latest release (default; `install` works too)
-  --uninstall       remove the panel, its data and the meghify CLI
+  --uninstall       remove the panel, its data, the meghify CLI and every
+                    Docker resource Meghify created
   --update          fetch the newest release and restart the panel
   --version         print the installer, binary and running versions
   --from-source     ignore releases: build with a host toolchain

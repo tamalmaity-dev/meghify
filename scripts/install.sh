@@ -79,7 +79,8 @@ usage() {
                    back to compiling the source inside Docker when no
                    GitHub release exists
     install        same as running it with no arguments
-    --uninstall    remove the panel, its data and the meghify CLI
+    --uninstall    remove the panel, its data, the meghify CLI and every
+                   Docker resource Meghify created
     --update       fetch the newest release (or rebuild the compose stack)
                    and restart the panel
     --version      print the installer, binary and running versions
@@ -318,6 +319,119 @@ do_version() {
   fi
 }
 
+# purge_meghify_docker removes every engine resource the panel created: app,
+# database, service, proxy, sandbox and terminal containers; their Compose
+# projects; managed and Compose volumes (data, build cache, proxy config and
+# certificates); managed networks; and the images built or pulled for those
+# containers. It never removes the Docker engine or unrelated projects.
+purge_meghify_docker() {
+  local dir="$1"
+  command -v docker >/dev/null 2>&1 || return 0
+
+  # The Compose panel itself must be stopped before its directories disappear.
+  if [[ -f "$dir/repo/docker-compose.yml" ]]; then
+    if docker compose version >/dev/null 2>&1; then
+      docker compose --project-directory "$dir" -f "$dir/repo/docker-compose.yml" \
+        -p meghify down -v --remove-orphans >/dev/null 2>&1 || true
+    elif command -v docker-compose >/dev/null 2>&1; then
+      docker-compose --project-directory "$dir" -f "$dir/repo/docker-compose.yml" \
+        -p meghify down -v --remove-orphans >/dev/null 2>&1 || true
+    fi
+  fi
+
+  local -a ids=() images=() refs=() repos=()
+  local id project image_id ref repo proxy_repo helper_repo sandbox_ref
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && ids+=("$id")
+  done < <(docker ps -aq --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$id" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) ids+=("$id") ;;
+    esac
+  done < <(docker ps -aq --filter 'label=com.docker.compose.project' 2>/dev/null || true)
+
+  if ((${#ids[@]})); then
+    mapfile -t ids < <(printf '%s\n' "${ids[@]}" | sort -u)
+    for id in "${ids[@]}"; do
+      image_id="$(docker inspect -f '{{.Image}}' "$id" 2>/dev/null || true)"
+      [[ -n "$image_id" ]] && images+=("$image_id")
+    done
+    docker rm -f -v "${ids[@]}" >/dev/null 2>&1 || true
+  fi
+
+  # Panel-created named volumes and networks carry meghify.managed=true.
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && docker volume rm "$repo" >/dev/null 2>&1 || true
+  done < <(docker volume ls -q --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] || continue
+    project="$(docker volume inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$repo" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) docker volume rm "$repo" >/dev/null 2>&1 || true ;;
+    esac
+  done < <(docker volume ls -q 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && docker network rm "$repo" >/dev/null 2>&1 || true
+  done < <(docker network ls -q --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] || continue
+    project="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$repo" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) docker network rm "$repo" >/dev/null 2>&1 || true ;;
+    esac
+  done < <(docker network ls -q 2>/dev/null || true)
+
+  # Images used by the removed containers, plus every image built by the panel.
+  for image_id in "${images[@]}"; do
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] && refs+=("$ref")
+    done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$image_id" 2>/dev/null || true)
+  done
+  while IFS= read -r image_id; do
+    [[ -n "$image_id" ]] || continue
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] && refs+=("$ref")
+    done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$image_id" 2>/dev/null || true)
+  done < <(docker image ls -q --filter 'label=meghify.application' 2>/dev/null || true)
+  if ((${#refs[@]})); then
+    mapfile -t refs < <(printf '%s\n' "${refs[@]}" | sort -u)
+    for ref in "${refs[@]}"; do
+      docker image rm "$ref" >/dev/null 2>&1 || true
+    done
+  fi
+
+  # Runtime, helper and proxy repositories. Docker refuses an image still
+  # referenced by a container, so an unrelated live project is never broken.
+  repos=(ghcr.io/tamalmaity-dev/meghify ghcr.io/tamalmaity-dev/meghify-helper coollabsio/coolify-helper)
+  proxy_repo="$(sed -n 's/^PROXY_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  [[ -n "$proxy_repo" ]] || proxy_repo="traefik:v3.7"
+  proxy_repo="${proxy_repo%:*}"
+  [[ -n "$proxy_repo" ]] && repos+=("$proxy_repo")
+  helper_repo="$(sed -n 's/^BUILD_HELPER_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  if [[ -n "$helper_repo" ]]; then
+    helper_repo="${helper_repo%:*}"
+    [[ -n "$helper_repo" ]] && repos+=("$helper_repo")
+  fi
+  for repo in "${repos[@]}"; do
+    while IFS= read -r ref; do
+      docker image rm "$ref" >/dev/null 2>&1 || true
+    done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk -v r="$repo" 'index($0, r ":") == 1 {print}')
+  done
+  while IFS= read -r ref; do
+    case "$ref" in meghify.local/*) docker image rm "$ref" >/dev/null 2>&1 || true ;; esac
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)
+
+  sandbox_ref="$(sed -n 's/^BUILD_SANDBOX_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  [[ -n "$sandbox_ref" ]] || sandbox_ref="docker:29-dind"
+  for ref in "$sandbox_ref" docker:27-cli; do
+    docker image rm "$ref" >/dev/null 2>&1 || true
+  done
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+}
+
 do_uninstall() {
   if (( "$(id -u)" != 0 )); then
     die "uninstall needs root — re-run with sudo"
@@ -330,7 +444,7 @@ do_uninstall() {
     :
   elif [[ -t 0 ]]; then
     local answer
-    read -r -p "Remove Meghify and ALL of its data (${PANEL_DIR})? [y/N] " answer
+    read -r -p "Remove Meghify, ALL of its data and every Docker resource it created? [y/N] " answer
     if [[ "${answer,,}" != y ]]; then
       say "cancelled"
       exit 0
@@ -340,14 +454,13 @@ do_uninstall() {
   fi
   say "stopping the panel"
   systemctl disable --now meghify >/dev/null 2>&1 || true
-  if [[ -f "$PANEL_DIR/repo/docker-compose.yml" ]]; then
-    compose_cmd down -v --remove-orphans >/dev/null 2>&1 || true
-  fi
+  say "removing the containers, volumes, networks and images Meghify created"
+  purge_meghify_docker "$PANEL_DIR"
   rm -f /etc/systemd/system/meghify.service
   systemctl daemon-reload 2>/dev/null || true
   rm -rf "$PANEL_DIR"
   rm -f /usr/local/bin/meghify
-  ok "removed Meghify (the Docker engine, images and other projects stay untouched)"
+  ok "removed Meghify and every Docker resource it created (the engine and unrelated projects stay)"
 }
 
 do_update() {
@@ -899,6 +1012,104 @@ dc() {
   fi
 }
 
+# Remove every engine resource this panel created. Kept in the installed CLI
+# as well as the installer so `meghify uninstall` works offline.
+purge_meghify_docker() {
+  local dir="$1"
+  command -v docker >/dev/null 2>&1 || return 0
+  if [[ -f "$dir/repo/docker-compose.yml" ]]; then
+    if docker compose version >/dev/null 2>&1; then
+      docker compose --project-directory "$dir" -f "$dir/repo/docker-compose.yml" \
+        -p meghify down -v --remove-orphans >/dev/null 2>&1 || true
+    elif command -v docker-compose >/dev/null 2>&1; then
+      docker-compose --project-directory "$dir" -f "$dir/repo/docker-compose.yml" \
+        -p meghify down -v --remove-orphans >/dev/null 2>&1 || true
+    fi
+  fi
+  local -a ids=() images=() refs=() repos=()
+  local id project image_id ref repo proxy_repo helper_repo sandbox_ref
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && ids+=("$id")
+  done < <(docker ps -aq --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$id" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) ids+=("$id") ;;
+    esac
+  done < <(docker ps -aq --filter 'label=com.docker.compose.project' 2>/dev/null || true)
+  if ((${#ids[@]})); then
+    mapfile -t ids < <(printf '%s\n' "${ids[@]}" | sort -u)
+    for id in "${ids[@]}"; do
+      image_id="$(docker inspect -f '{{.Image}}' "$id" 2>/dev/null || true)"
+      [[ -n "$image_id" ]] && images+=("$image_id")
+    done
+    docker rm -f -v "${ids[@]}" >/dev/null 2>&1 || true
+  fi
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && docker volume rm "$repo" >/dev/null 2>&1 || true
+  done < <(docker volume ls -q --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] || continue
+    project="$(docker volume inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$repo" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) docker volume rm "$repo" >/dev/null 2>&1 || true ;;
+    esac
+  done < <(docker volume ls -q 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] && docker network rm "$repo" >/dev/null 2>&1 || true
+  done < <(docker network ls -q --filter 'label=meghify.managed=true' 2>/dev/null || true)
+  while IFS= read -r repo; do
+    [[ -n "$repo" ]] || continue
+    project="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$repo" 2>/dev/null || true)"
+    case "$project" in
+      meghify|meghify-app-*|meghify-svc-*) docker network rm "$repo" >/dev/null 2>&1 || true ;;
+    esac
+  done < <(docker network ls -q 2>/dev/null || true)
+  for image_id in "${images[@]}"; do
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] && refs+=("$ref")
+    done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$image_id" 2>/dev/null || true)
+  done
+  while IFS= read -r image_id; do
+    [[ -n "$image_id" ]] || continue
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] && refs+=("$ref")
+    done < <(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$image_id" 2>/dev/null || true)
+  done < <(docker image ls -q --filter 'label=meghify.application' 2>/dev/null || true)
+  if ((${#refs[@]})); then
+    mapfile -t refs < <(printf '%s\n' "${refs[@]}" | sort -u)
+    for ref in "${refs[@]}"; do
+      docker image rm "$ref" >/dev/null 2>&1 || true
+    done
+  fi
+  repos=(ghcr.io/tamalmaity-dev/meghify ghcr.io/tamalmaity-dev/meghify-helper coollabsio/coolify-helper)
+  proxy_repo="$(sed -n 's/^PROXY_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  [[ -n "$proxy_repo" ]] || proxy_repo="traefik:v3.7"
+  proxy_repo="${proxy_repo%:*}"
+  [[ -n "$proxy_repo" ]] && repos+=("$proxy_repo")
+  helper_repo="$(sed -n 's/^BUILD_HELPER_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  if [[ -n "$helper_repo" ]]; then
+    helper_repo="${helper_repo%:*}"
+    [[ -n "$helper_repo" ]] && repos+=("$helper_repo")
+  fi
+  for repo in "${repos[@]}"; do
+    while IFS= read -r ref; do
+      docker image rm "$ref" >/dev/null 2>&1 || true
+    done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | awk -v r="$repo" 'index($0, r ":") == 1 {print}')
+  done
+  while IFS= read -r ref; do
+    case "$ref" in meghify.local/*) docker image rm "$ref" >/dev/null 2>&1 || true ;; esac
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)
+  sandbox_ref="$(sed -n 's/^BUILD_SANDBOX_IMAGE=//p' "$dir/.env" 2>/dev/null | tail -n1 | tr -d '\r')"
+  [[ -n "$sandbox_ref" ]] || sandbox_ref="docker:29-dind"
+  for ref in "$sandbox_ref" docker:27-cli; do
+    docker image rm "$ref" >/dev/null 2>&1 || true
+  done
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+}
+
 swap_and_check() { # swap_and_check <tag> — binary swap with rollback (systemd)
   local tag="$1" stage
   stage="$(mktemp -d /tmp/meghify-rel.XXXXXX)"
@@ -1040,17 +1251,24 @@ case "$cmd" in
     if [[ "$YES" == 1 ]]; then
       :
     elif [[ -t 0 ]]; then
-      read -r -p "remove Meghify, its data volumes and ${DIR}? [y/N] " a
+      read -r -p "remove Meghify, ALL of its data and every Docker resource it created? [y/N] " a
       [[ "${a,,}" == y ]] || { echo "cancelled"; exit 0; }
     else
       echo "non-interactive session — re-run with --yes to confirm removal" >&2
       exit 1
     fi
+    if (( EUID != 0 )); then
+      echo "uninstall needs root - re-run with sudo" >&2
+      exit 1
+    fi
     systemctl disable --now meghify >/dev/null 2>&1 || true
-    dc down -v --remove-orphans >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/meghify.service && systemctl daemon-reload 2>/dev/null || true
+    echo "==> removing the containers, volumes, networks and images Meghify created"
+    purge_meghify_docker "$DIR"
+    rm -f /etc/systemd/system/meghify.service
+    systemctl daemon-reload 2>/dev/null || true
     rm -rf "$DIR"
-    echo "removed." ;;
+    rm -f /usr/local/bin/meghify
+    echo "removed Meghify and every Docker resource it created (the engine and unrelated projects stay)." ;;
   *)
     echo "usage: meghify {status|logs|restart|version|update [--check]|uninstall [--yes]}" ;;
 esac
