@@ -222,6 +222,17 @@ export interface Volume {
   createdAt: string;
 }
 
+export interface ContainerInfo {
+  id: string;
+  name: string;
+  image: string;
+  state: "created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead" | string;
+  status: string;
+  labels: Record<string, string>;
+  ports: string[];
+  created: number;
+}
+
 export interface NodeMetrics {
   id: string;
   nodeId: string;
@@ -271,7 +282,40 @@ export interface DockerDiskUsage {
 export interface DockerCleanupResult {
   reclaimed: number;
   imagesRemoved: number;
+  orphanedContainers?: number;
+  volumesRemoved?: number;
+  networksRemoved?: number;
   sandbox: boolean;
+}
+
+export type DockerCleanupTrigger = "schedule" | "threshold";
+export type DockerCleanupImages = "keep" | "remove";
+
+/** Server-scoped Docker cleanup schedule shown on the local server page. */
+export interface DockerCleanupSettings {
+  enabled: boolean;
+  schedule: string;
+  trigger: DockerCleanupTrigger;
+  thresholdPercent: number;
+  unusedVolumes: boolean;
+  unusedNetworks: boolean;
+  applicationImages: DockerCleanupImages;
+  updatedAt: string;
+}
+
+export interface DockerCleanupRun {
+  id: string;
+  trigger: "manual" | "schedule";
+  status: "running" | "success" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  durationMs: number;
+  reclaimedBytes: number;
+  imagesRemoved: number;
+  orphanedContainers: number;
+  volumesRemoved: number;
+  networksRemoved: number;
+  error?: string;
 }
 
 export interface APIToken {

@@ -269,6 +269,8 @@ export function ApplicationDetailPage() {
                         window.location.protocol === "https:" ? "wss" : "ws"
                       }://${window.location.host}/api/applications/${applicationId}/terminal`}
                       className="h-full"
+                      title={application?.name ?? "Application"}
+                      subtitle="container shell"
                       banner="\r\nConnected to container.\r\n"
                     />
                   </div>

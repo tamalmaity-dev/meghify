@@ -52,6 +52,7 @@ const NAV = [
   { to: "/databases", label: "Databases", icon: Database, adminOnly: false },
   { to: "/sources", label: "Sources", icon: Github, adminOnly: true },
   { to: "/nodes", label: "Servers", icon: Server, adminOnly: true },
+  { to: "/terminal", label: "Terminal", icon: TerminalSquare, adminOnly: true },
   { to: "/jobs", label: "Job queue", icon: Boxes, adminOnly: true },
   { to: "/team", label: "Team", icon: Users, adminOnly: true },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },

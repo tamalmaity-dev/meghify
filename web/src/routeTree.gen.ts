@@ -18,6 +18,7 @@ import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as TeamRouteImport } from './routes/team'
+import { Route as TerminalRouteImport } from './routes/terminal'
 import { Route as ApplicationsApplicationIdRouteImport } from './routes/applications.$applicationId'
 import { Route as NodesIndexRouteImport } from './routes/nodes.index'
 import { Route as NodesNodeIdRouteImport } from './routes/nodes.$nodeId'
@@ -71,6 +72,11 @@ const TeamRoute = TeamRouteImport.update({
   path: '/team',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TerminalRoute = TerminalRouteImport.update({
+  id: '/terminal',
+  path: '/terminal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApplicationsApplicationIdRoute =
   ApplicationsApplicationIdRouteImport.update({
     id: '/applications/$applicationId',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
+  '/terminal': typeof TerminalRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -133,6 +140,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/team': typeof TeamRoute
+  '/terminal': typeof TerminalRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -152,6 +160,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sources': typeof SourcesRouteWithChildren
   '/team': typeof TeamRoute
+  '/terminal': typeof TerminalRoute
   '/applications/$applicationId': typeof ApplicationsApplicationIdRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sources'
     | '/team'
+    | '/terminal'
     | '/applications/$applicationId'
     | '/nodes/$nodeId'
     | '/projects/$projectId'
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/team'
+    | '/terminal'
     | '/applications/$applicationId'
     | '/nodes/$nodeId'
     | '/projects/$projectId'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sources'
     | '/team'
+    | '/terminal'
     | '/applications/$applicationId'
     | '/nodes/$nodeId'
     | '/projects/$projectId'
@@ -224,6 +236,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SourcesRoute: typeof SourcesRouteWithChildren
   TeamRoute: typeof TeamRoute
+  TerminalRoute: typeof TerminalRoute
   ApplicationsApplicationIdRoute: typeof ApplicationsApplicationIdRoute
 }
 
@@ -290,6 +303,13 @@ declare module '@tanstack/react-router' {
       path: '/team'
       fullPath: '/team'
       preLoaderRoute: typeof TeamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terminal': {
+      id: '/terminal'
+      path: '/terminal'
+      fullPath: '/terminal'
+      preLoaderRoute: typeof TerminalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/applications/$applicationId': {
@@ -393,6 +413,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SourcesRoute: SourcesRouteWithChildren,
   TeamRoute: TeamRoute,
+  TerminalRoute: TerminalRoute,
   ApplicationsApplicationIdRoute: ApplicationsApplicationIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -219,6 +219,12 @@ func run() error {
 	} else if requeued > 0 {
 		logger.Warn("requeued jobs interrupted by restart", "jobs", requeued)
 	}
+	if stale, err := store.DockerCleanup.FailRunningRuns(recoverCtx,
+		"panel restarted before this cleanup finished"); err != nil {
+		logger.Warn("could not close interrupted docker cleanup runs", "error", err)
+	} else if stale > 0 {
+		logger.Warn("closed interrupted docker cleanup runs", "runs", stale)
+	}
 	recoverDone()
 
 	// The sandbox is only needed while a build is running. Reconcile left no
@@ -309,6 +315,16 @@ func registerJobs(
 		return collectGarbage(ctx, store, client, cfg, logger)
 	})
 
+	runner.Register(db.JobDockerCleanup, func(ctx context.Context, payload string) error {
+		result, err := deploy.RunDockerCleanup(ctx, client, store, cfg, "schedule", true)
+		if (result.Reclaimed > 0 || result.ImagesRemoved > 0) && logger != nil {
+			logger.Info("scheduled docker cleanup reclaimed storage",
+				"bytes", result.Reclaimed, "images", result.ImagesRemoved,
+				"volumes", result.VolumesRemoved, "networks", result.NetworksRemoved)
+		}
+		return err
+	})
+
 	runner.Register(db.JobBackup, func(ctx context.Context, payload string) error {
 		var body struct {
 			BackupID string `json:"backupId"`
@@ -337,6 +353,9 @@ func registerJobs(
 			defer cancel()
 			collectRemoteMetrics(remoteCtx, store, nodes, resolveClient, logger)
 		}()
+	})
+	runner.RegisterCronFunc("@every 1m", func(ctx context.Context) {
+		scheduleDockerCleanup(ctx, store, logger)
 	})
 	if cfg.BuildSandboxIdle > 0 {
 		runner.RegisterCronFunc("@every 5m", func(ctx context.Context) {

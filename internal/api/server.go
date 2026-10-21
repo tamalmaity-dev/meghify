@@ -173,6 +173,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/{id}/validate", s.validateNode)
 			r.Get("/{id}/metrics", s.nodeMetrics)
 			r.Get("/{id}/containers", s.nodeContainers)
+			r.Get("/{id}/containers/{containerId}/terminal", s.containerTerminal)
 			r.Get("/{id}/terminal", s.nodeTerminal)
 		})
 
@@ -254,7 +255,10 @@ func (s *Server) Router() http.Handler {
 		r.Route("/docker", func(r chi.Router) {
 			r.Use(s.authMW.RequireAdmin)
 			r.Get("/df", s.dockerDiskUsage)
+			r.Get("/cleanup", s.dockerCleanupSettings)
+			r.Put("/cleanup", s.updateDockerCleanupSettings)
 			r.Post("/cleanup", s.dockerCleanup)
+			r.Get("/cleanup/history", s.dockerCleanupHistory)
 		})
 
 		r.Route("/deployments", func(r chi.Router) {
@@ -381,7 +385,7 @@ func mapError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "resource not found")
-	case errors.Is(err, errNoEngine):
+	case errors.Is(err, errNoEngine), errors.Is(err, docker.ErrEngineUnavailable):
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "invalid credentials")

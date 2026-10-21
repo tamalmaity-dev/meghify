@@ -38,9 +38,29 @@ type CleanupResult struct {
 	// gone. They are removed before the image sweep so their old image can be
 	// reclaimed in the same pass.
 	OrphanedContainers int64 `json:"orphanedContainers,omitempty"`
+	VolumesRemoved     int64 `json:"volumesRemoved,omitempty"`
+	NetworksRemoved    int64 `json:"networksRemoved,omitempty"`
 	// Sandbox says whether the build sandbox took part (it does not run in
 	// some setups, e.g. BUILD_SANDBOX=off).
 	Sandbox bool `json:"sandbox"`
+}
+
+// CleanupOptions selects the resources one cleanup pass may reclaim. The
+// default (zero) keeps operator resources and only performs the panel's
+// normal dangling-image, retention, helper and cache maintenance.
+type CleanupOptions struct {
+	Protect     map[string]struct{}
+	KnownApps   map[string]struct{}
+	ImageKeep   int
+	CacheKeep   int64
+	HelperImage string
+	ProxyImage  string
+
+	// UnusedVolumes and UnusedNetworks are opt-in because they can remove
+	// data from stopped containers. Prune methods are label-scoped, so only
+	// panel-created volumes and networks participate.
+	UnusedVolumes  bool
+	UnusedNetworks bool
 }
 
 // CleanupEngine reclaims Docker storage everywhere the panel is responsible
@@ -49,7 +69,7 @@ type CleanupResult struct {
 // helper and proxy image versions. Failures are joined into the returned error
 // while every remaining step still runs, so a sandbox hiccup cannot block an
 // engine cleanup.
-func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, knownApps map[string]struct{}, imageKeep int, cacheKeep int64, helperImage, proxyImage string) (CleanupResult, error) {
+func CleanupEngine(ctx context.Context, client *docker.Client, opts CleanupOptions) (CleanupResult, error) {
 	var result CleanupResult
 	if client == nil {
 		return result, nil
@@ -62,8 +82,8 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 	// image from the retention sweep forever. Remove both before considering
 	// retention; a nil map means the caller could not read the application
 	// list, so this pass is skipped rather than treating every app as gone.
-	if knownApps != nil {
-		containers, images, err := PruneOrphanedApplications(ctx, client, knownApps, protect)
+	if opts.KnownApps != nil {
+		containers, images, err := PruneOrphanedApplications(ctx, client, opts.KnownApps, opts.Protect)
 		result.OrphanedContainers = int64(containers)
 		result.ImagesRemoved += int64(images)
 		if err != nil {
@@ -77,7 +97,7 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 		result.Reclaimed += bytes
 	}
 
-	if bytes, removed, err := client.PruneManagedImages(ctx, "", imageKeep, protect); err != nil {
+	if bytes, removed, err := client.PruneManagedImages(ctx, "", opts.ImageKeep, opts.Protect); err != nil {
 		errs = append(errs, err)
 	} else {
 		result.Reclaimed += bytes
@@ -100,8 +120,8 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 		result.Reclaimed += bytes
 		result.ImagesRemoved += int64(removed)
 	}
-	currentHelperRepo := docker.RepoOf(helperImage)
-	pruneRepo(currentHelperRepo, helperImage)
+	currentHelperRepo := docker.RepoOf(opts.HelperImage)
+	pruneRepo(currentHelperRepo, opts.HelperImage)
 	// Releases before v0.3.1 used Coolify's helper image. Its layers live in a
 	// different repository, so the sweep above never reclaimed them. Removing
 	// the tags is safe even on a host that also runs Coolify: the engine
@@ -114,19 +134,35 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 	// The proxy repository is shared with upstream tags, so keep the exact
 	// configured reference. Upgrading from traefik:v3.3 to v3.7 is the common
 	// case: the old layer set is no longer referenced and can go.
-	if proxyRepo := docker.RepoOf(proxyImage); proxyRepo != "" && proxyRepo != currentHelperRepo {
-		pruneRepo(proxyRepo, proxyImage)
+	if proxyRepo := docker.RepoOf(opts.ProxyImage); proxyRepo != "" && proxyRepo != currentHelperRepo {
+		pruneRepo(proxyRepo, opts.ProxyImage)
 	}
 
-	if cacheKeep > 0 {
-		if bytes, err := client.BuildCachePruneKeep(ctx, cacheKeep); err != nil {
+	if opts.UnusedVolumes {
+		if bytes, removed, err := client.PruneVolumes(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
+			result.Reclaimed += bytes
+			result.VolumesRemoved = int64(removed)
+		}
+	}
+	if opts.UnusedNetworks {
+		if removed, err := client.PruneNetworks(ctx); err != nil {
+			errs = append(errs, err)
+		} else {
+			result.NetworksRemoved = int64(removed)
+		}
+	}
+
+	if opts.CacheKeep > 0 {
+		if bytes, err := client.BuildCachePruneKeep(ctx, opts.CacheKeep); err != nil {
 			errs = append(errs, err)
 		} else {
 			result.Reclaimed += bytes
 		}
 	}
 
-	if bytes, ok, err := PruneSandbox(ctx, client, cacheKeep); err != nil {
+	if bytes, ok, err := PruneSandbox(ctx, client, opts.CacheKeep); err != nil {
 		errs = append(errs, err)
 	} else if ok {
 		result.Reclaimed += bytes

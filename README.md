@@ -32,7 +32,9 @@ Meghify (Go + SQLite)       ~16 MB           ~0%             1
 - **Route domains** with automatic HTTPS through Traefik.
 - **Manage several servers** from one dashboard over SSH.
 - **Stream build and runtime logs** live.
-- **Open a shell** inside any running container (admins).
+- **Open a shell** on any server or inside any running container from the
+  Terminal page, with a keepalive connection, reconnect, themes and font
+  controls (admins).
 - **Automate work** with a durable job queue that needs no Redis.
 
 ---
@@ -249,7 +251,11 @@ on `:5173` and proxies `/api` and the SSE stream to the Go panel on `:8080`.
 | `POST` `/api/auth/bootstrap` | Create the first admin |
 | `POST` `/api/auth/login` | Sign in |
 | `GET` `/api/stream?channel=deployment:<id>` | Live build output |
-| `GET` `/api/applications/{id}/terminal` | Container shell (WebSocket, admin) |
+| `GET` `/api/applications/{id}/terminal` | Application container shell (WebSocket, admin) |
+| `GET` `/api/nodes/{id}/terminal` | Server shell (WebSocket, admin) |
+| `GET` `/api/nodes/{id}/containers/{containerId}/terminal` | Container shell (WebSocket, admin) |
+| `GET/PUT` `/api/docker/cleanup` | Docker cleanup schedule and options (admin) |
+| `GET` `/api/docker/cleanup/history` | Recent cleanup executions (admin) |
 | `GET` `/openapi.json` | API schema (planned) |
 
 ---

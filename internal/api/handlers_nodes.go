@@ -392,7 +392,9 @@ func (s *Server) nodeMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metrics)
 }
 
-// nodeContainers lists the managed containers on a node.
+// nodeContainers lists containers on a node. By default only panel-managed
+// containers are returned; the terminal target picker asks for ?all=1 so an
+// operator can attach to anything running on that engine.
 func (s *Server) nodeContainers(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	client, err := s.clientForNode(r.Context(), id)
@@ -400,7 +402,12 @@ func (s *Server) nodeContainers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	containers, err := client.ListContainers(r.Context(), "", "")
+	var containers []*dockerContainerInfo
+	if r.URL.Query().Get("all") == "1" {
+		containers, err = client.ListAllContainers(r.Context())
+	} else {
+		containers, err = client.ListContainers(r.Context(), "", "")
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

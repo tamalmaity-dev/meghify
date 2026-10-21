@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/tamalmaity-dev/meghify/internal/config"
 	"github.com/tamalmaity-dev/meghify/internal/db"
 	"github.com/tamalmaity-dev/meghify/internal/deploy"
@@ -120,6 +122,11 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 			}
 		}
 	}
+	// Cleanup history is diagnostic, not an audit record; keep three months of
+	// scheduled/manual runs even when the schedule runs frequently.
+	if _, err := store.DockerCleanup.PruneRuns(ctx, time.Now().AddDate(0, 0, -90)); err != nil && logger != nil {
+		logger.Warn("could not prune docker cleanup history", "error", err)
+	}
 	// Host-metrics sampling no longer enters the queue, but panels upgraded from
 	// older releases still hold thousands of rows: clear them within the hour.
 	if _, err := store.Jobs.PruneJobsByKind(ctx, db.JobNodeMetrics, time.Now().Add(-time.Hour)); err != nil {
@@ -155,12 +162,89 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 			}
 		}
 	}
-	result, err := deploy.CleanupEngine(ctx, client, protect, knownApps, cfg.ImageKeep, cfg.BuildCacheKeepBytes(), cfg.EffectiveHelperImage(), cfg.ProxyImage)
+	result, err := deploy.CleanupEngine(ctx, client, deploy.CleanupOptions{
+		Protect:     protect,
+		KnownApps:   knownApps,
+		ImageKeep:   cfg.ImageKeep,
+		CacheKeep:   cfg.BuildCacheKeepBytes(),
+		HelperImage: cfg.EffectiveHelperImage(),
+		ProxyImage:  cfg.ProxyImage,
+	})
 	if (result.Reclaimed > 0 || result.ImagesRemoved > 0) && logger != nil {
 		logger.Info("docker cleanup reclaimed storage",
 			"bytes", result.Reclaimed, "images", result.ImagesRemoved, "sandbox", result.Sandbox)
 	}
 	return err
+}
+
+// scheduleDockerCleanup checks the server-page schedule once a minute. It only
+// enqueues a durable job; the cleanup itself runs in the worker so a slow
+// sandbox prune cannot block the scheduler. A pending job is collapsed by
+// EnqueueUnique, which also makes a panel restart safe.
+func scheduleDockerCleanup(ctx context.Context, store *db.Store, logger *slog.Logger) {
+	settings, err := store.DockerCleanup.Settings(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("could not read docker cleanup schedule", "error", err)
+		}
+		return
+	}
+	if !settings.Enabled {
+		return
+	}
+
+	now := time.Now().UTC()
+	if settings.Trigger == db.CleanupTriggerThreshold {
+		sample, ok := hostSampleNow()
+		if !ok || sample.DiskTotal <= 0 {
+			return
+		}
+		usedPercent := float64(sample.DiskUsed) / float64(sample.DiskTotal) * 100
+		if usedPercent < float64(settings.ThresholdPercent) {
+			return
+		}
+	}
+
+	last, err := store.DockerCleanup.LatestScheduledRun(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("could not read last docker cleanup run", "error", err)
+		}
+		return
+	}
+	if last != nil && last.Status == db.CleanupRunRunning {
+		return
+	}
+
+	base := now.Add(-time.Minute)
+	if last != nil {
+		if !last.FinishedAt.IsZero() {
+			base = last.FinishedAt
+		} else if !last.StartedAt.IsZero() {
+			base = last.StartedAt
+		}
+	}
+	schedule, err := cron.ParseStandard(settings.Schedule)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("invalid docker cleanup schedule", "schedule", settings.Schedule, "error", err)
+		}
+		return
+	}
+	if next := schedule.Next(base); next.After(now) {
+		return
+	}
+
+	job, created, err := store.Jobs.EnqueueUnique(ctx, db.JobDockerCleanup, db.CleanupTriggerSchedule, now, 1)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("could not enqueue scheduled docker cleanup", "error", err)
+		}
+		return
+	}
+	if created && logger != nil {
+		logger.Info("scheduled docker cleanup", "job", job.ID)
+	}
 }
 
 // runBackup executes one database backup.

@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
@@ -50,6 +52,59 @@ func (s *Server) terminalSession(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	session, err := client.ExecInteractive(ctx, docker.ExecOptions{ContainerID: container.ID})
+	if err != nil {
+		conn.Close(websocket.StatusInternalError, err.Error())
+		return
+	}
+	defer session.Conn.Close()
+
+	pumpTerminal(ctx, conn, session.Conn, func(rows, cols uint) {
+		_ = client.ResizeExec(ctx, session.ID, rows, cols)
+	})
+}
+
+// containerTerminal attaches a shell to any container on a server. The
+// application-scoped terminal above hides the container name; the global
+// Terminal page needs to open the exact container the operator picked.
+func (s *Server) containerTerminal(w http.ResponseWriter, r *http.Request) {
+	nodeID := chi.URLParam(r, "id")
+	containerID := chi.URLParam(r, "containerId")
+	if containerID == "" {
+		writeError(w, http.StatusBadRequest, "container is required")
+		return
+	}
+
+	client, err := s.clientForNode(r.Context(), nodeID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	info, err := client.InspectContainer(r.Context(), containerID)
+	if err != nil {
+		if errors.Is(err, docker.ErrNoSuchContainer) {
+			writeError(w, http.StatusNotFound, "container not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if info == nil || info.State == nil || !info.State.Running {
+		writeError(w, http.StatusConflict, "container is not running")
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+
+	ctx := r.Context()
+	targetID := info.ID
+	if targetID == "" {
+		targetID = containerID
+	}
+	session, err := client.ExecInteractive(ctx, docker.ExecOptions{ContainerID: targetID})
 	if err != nil {
 		conn.Close(websocket.StatusInternalError, err.Error())
 		return
@@ -221,8 +276,26 @@ func pumpTerminal(ctx context.Context, conn *websocket.Conn, tty interface {
 		}
 	}()
 
-	select {
-	case <-ctx.Done():
-	case <-errc:
+	// Idle terminals are common: an operator starts a shell, reads output and
+	// leaves the tab open. Proxies and browsers may drop a WebSocket that has
+	// been quiet for a minute or two, so keep an application-level ping in
+	// flight. A browser answers pings automatically; a failed ping also tells
+	// the server that the tab is really gone.
+	ping := time.NewTicker(20 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-errc:
+			return
+		case <-ping.C:
+			pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				return
+			}
+		}
 	}
 }

@@ -11,6 +11,7 @@ import { Input, Label } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { XTerminal } from "@/components/terminal";
 import { SystemMetrics } from "@/components/system-metrics";
+import { DockerCleanupPanel } from "@/components/docker-cleanup";
 import { cn } from "@/lib/utils";
 import type { Node } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
@@ -21,6 +22,7 @@ const SECTIONS = [
   { key: "general", label: "General" },
   { key: "terminal", label: "Terminal" },
   { key: "metrics", label: "Metrics" },
+  { key: "docker", label: "Docker cleanup" },
   { key: "danger", label: "Danger zone" },
 ] as const;
 
@@ -64,6 +66,15 @@ export function NodeDetailPage() {
       hostKeyFingerprint: node.data.hostKeyFingerprint ?? "",
     });
   }, [node.data]);
+
+  // Docker cleanup is scoped to the panel's local engine. If the user was on
+  // that tab and then opens a remote server, fall back to General instead of
+  // rendering an empty pane.
+  useEffect(() => {
+    if (section === "docker" && node.data && node.data.id !== LOCAL_NODE_ID) {
+      setSection("general");
+    }
+  }, [node.data, section]);
 
   const save = useMutation({
     mutationFn: () => api.patch<Node>(`/nodes/${nodeId}`, form),
@@ -119,6 +130,9 @@ export function NodeDetailPage() {
 
   const server = node.data;
   const isLocal = server.id === LOCAL_NODE_ID;
+  // Cleanup runs against the panel's own Docker engine, so it is not offered
+  // on remote nodes until their engines are managed by the cleanup service.
+  const sections = isLocal ? SECTIONS : SECTIONS.filter((item) => item.key !== "docker");
   const ready = server.status === "online";
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const terminalUrl = `${protocol}://${window.location.host}/api/nodes/${nodeId}/terminal`;
@@ -145,7 +159,7 @@ export function NodeDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
         <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-          {SECTIONS.map((item) => (
+          {sections.map((item) => (
             <button
               key={item.key}
               onClick={() => setSection(item.key)}
@@ -351,6 +365,8 @@ export function NodeDetailPage() {
                   <XTerminal
                     url={terminalUrl}
                     className="h-full"
+                    title={server.name}
+                    subtitle={isLocal ? "localhost" : `${server.sshUser}@${server.address}`}
                     banner={
                       isLocal
                         ? "\r\nConnected to a helper container on the server (docker CLI included).\r\n"
@@ -363,6 +379,8 @@ export function NodeDetailPage() {
           )}
 
           {section === "metrics" && <SystemMetrics nodeId={nodeId} />}
+
+          {section === "docker" && isLocal && <DockerCleanupPanel />}
 
           {section === "danger" && (
             <Card>

@@ -534,3 +534,142 @@ func TestProjectCascadeCreatesEnvironment(t *testing.T) {
 		t.Fatalf("expected cascade delete to remove environments, got %d", len(remaining))
 	}
 }
+
+func TestDockerCleanupSettingsRoundTrip(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	settings, err := store.DockerCleanup.Settings(ctx)
+	if err != nil {
+		t.Fatalf("defaults: %v", err)
+	}
+	if !settings.Enabled || settings.Schedule != "0 0 * * *" || settings.Trigger != db.CleanupTriggerSchedule {
+		t.Fatalf("unexpected defaults: %+v", settings)
+	}
+	if settings.UpdatedAt.IsZero() {
+		t.Fatal("default settings should have an updated timestamp")
+	}
+
+	settings.Enabled = false
+	settings.Schedule = "0 */6 * * *"
+	settings.Trigger = db.CleanupTriggerThreshold
+	settings.ThresholdPercent = 72
+	settings.UnusedVolumes = true
+	settings.UnusedNetworks = true
+	settings.ApplicationImages = db.CleanupImagesRemove
+	if err := store.DockerCleanup.SaveSettings(ctx, settings); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	reloaded, err := store.DockerCleanup.Settings(ctx)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Enabled || reloaded.Schedule != "0 */6 * * *" || reloaded.Trigger != db.CleanupTriggerThreshold {
+		t.Fatalf("reloaded settings did not round-trip: %+v", reloaded)
+	}
+	if reloaded.ThresholdPercent != 72 || !reloaded.UnusedVolumes || !reloaded.UnusedNetworks {
+		t.Fatalf("advanced options did not round-trip: %+v", reloaded)
+	}
+	if reloaded.ApplicationImages != db.CleanupImagesRemove {
+		t.Fatalf("application images = %q, want remove", reloaded.ApplicationImages)
+	}
+}
+
+func TestDockerCleanupRunHistory(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	manual := &db.DockerCleanupRun{
+		ID:        db.NewID(),
+		Trigger:   "manual",
+		Status:    db.CleanupRunRunning,
+		StartedAt: time.Now().UTC().Add(-2 * time.Minute),
+	}
+	scheduled := &db.DockerCleanupRun{
+		ID:        db.NewID(),
+		Trigger:   db.CleanupTriggerSchedule,
+		Status:    db.CleanupRunRunning,
+		StartedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	for _, run := range []*db.DockerCleanupRun{manual, scheduled} {
+		if err := store.DockerCleanup.AddRun(ctx, run); err != nil {
+			t.Fatalf("add run: %v", err)
+		}
+	}
+	if err := store.DockerCleanup.FinishRun(ctx, manual.ID, db.CleanupRunSuccess,
+		3*time.Second, 4096, 2, 1, 3, 2, ""); err != nil {
+		t.Fatalf("finish manual: %v", err)
+	}
+	if err := store.DockerCleanup.FinishRun(ctx, scheduled.ID, db.CleanupRunFailed,
+		time.Second, 0, 0, 0, 0, 0, "engine unavailable"); err != nil {
+		t.Fatalf("finish scheduled: %v", err)
+	}
+
+	runs, err := store.DockerCleanup.Runs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 2 || runs[0].ID != scheduled.ID {
+		t.Fatalf("runs are not newest-first: %+v", runs)
+	}
+	if runs[1].ReclaimedBytes != 4096 || runs[1].ImagesRemoved != 2 ||
+		runs[1].OrphanedContainers != 1 || runs[1].VolumesRemoved != 3 ||
+		runs[1].NetworksRemoved != 2 {
+		t.Fatalf("manual result did not round-trip: %+v", runs[1])
+	}
+	if runs[0].Status != db.CleanupRunFailed || runs[0].Error != "engine unavailable" {
+		t.Fatalf("failed run did not round-trip: %+v", runs[0])
+	}
+	if runs[1].DurationMS != 3000 || runs[1].FinishedAt.IsZero() {
+		t.Fatalf("duration/finish time did not round-trip: %+v", runs[1])
+	}
+
+	latest, err := store.DockerCleanup.LatestScheduledRun(ctx)
+	if err != nil {
+		t.Fatalf("latest scheduled: %v", err)
+	}
+	if latest == nil || latest.ID != scheduled.ID {
+		t.Fatalf("latest scheduled = %+v, want %s", latest, scheduled.ID)
+	}
+
+	removed, err := store.DockerCleanup.PruneRuns(ctx, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("prune runs: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("pruned %d runs, want 2", removed)
+	}
+}
+
+func TestFailRunningDockerCleanupRuns(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+
+	run := &db.DockerCleanupRun{
+		ID:        db.NewID(),
+		Trigger:   db.CleanupTriggerSchedule,
+		Status:    db.CleanupRunRunning,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := store.DockerCleanup.AddRun(ctx, run); err != nil {
+		t.Fatalf("add run: %v", err)
+	}
+	closed, err := store.DockerCleanup.FailRunningRuns(ctx, "panel restarted")
+	if err != nil {
+		t.Fatalf("fail running: %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("closed %d runs, want 1", closed)
+	}
+	runs, err := store.DockerCleanup.Runs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Status != db.CleanupRunFailed || runs[0].Error != "panel restarted" {
+		t.Fatalf("stale run not closed correctly: %+v", runs)
+	}
+	if runs[0].FinishedAt.IsZero() {
+		t.Fatal("closed run should have a finish time")
+	}
+}

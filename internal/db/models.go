@@ -67,12 +67,13 @@ const (
 
 // Job kinds handled by the durable worker.
 const (
-	JobDeploy      = "deploy"
-	JobBuildImage  = "build_image"
-	JobProvisionDB = "provision_db"
-	JobBackup      = "backup"
-	JobNodeMetrics = "node_metrics"
-	JobGC          = "gc"
+	JobDeploy        = "deploy"
+	JobBuildImage    = "build_image"
+	JobProvisionDB   = "provision_db"
+	JobBackup        = "backup"
+	JobNodeMetrics   = "node_metrics"
+	JobGC            = "gc"
+	JobDockerCleanup = "docker_cleanup"
 )
 
 // Job states.

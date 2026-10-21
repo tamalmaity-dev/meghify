@@ -29,6 +29,10 @@ import (
 // ErrNoSuchContainer is returned when a container id is unknown to the engine.
 var ErrNoSuchContainer = errors.New("no such container")
 
+// ErrEngineUnavailable is returned when an operation needs an engine the panel
+// did not configure or could not create a client for.
+var ErrEngineUnavailable = errors.New("the Docker engine is unavailable")
+
 // Client wraps the official Docker SDK with the operations the panel needs.
 type Client struct {
 	cli *client.Client
@@ -376,6 +380,17 @@ func (c *Client) ListContainers(ctx context.Context, labelKey, labelValue string
 	if labelKey != "" {
 		args.Add("label", labelKey+"="+labelValue)
 	}
+	return c.listContainers(ctx, args)
+}
+
+// ListAllContainers returns every container on the engine, including ones the
+// panel did not create. The terminal target picker needs them; normal resource
+// management stays scoped to ListContainers.
+func (c *Client) ListAllContainers(ctx context.Context) ([]*ContainerInfo, error) {
+	return c.listContainers(ctx, filters.NewArgs())
+}
+
+func (c *Client) listContainers(ctx context.Context, args filters.Args) ([]*ContainerInfo, error) {
 	list, err := c.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
 	if err != nil {
 		return nil, err
@@ -748,6 +763,31 @@ func (c *Client) PruneImages(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("prune images: %w", err)
 	}
 	return int64(report.SpaceReclaimed), nil
+}
+
+// PruneVolumes removes unused panel-created volumes. The label filter keeps
+// operator volumes outside the panel's namespace out of the sweep. Volumes
+// attached to stopped containers are considered in use by the engine, so the
+// UI warning about stopped-container data is accurate.
+func (c *Client) PruneVolumes(ctx context.Context) (int64, int, error) {
+	report, err := c.cli.VolumesPrune(ctx, filters.NewArgs(
+		filters.Arg("label", "meghify.managed=true"),
+	))
+	if err != nil {
+		return 0, 0, fmt.Errorf("prune volumes: %w", err)
+	}
+	return int64(report.SpaceReclaimed), len(report.VolumesDeleted), nil
+}
+
+// PruneNetworks removes unused panel-created networks.
+func (c *Client) PruneNetworks(ctx context.Context) (int, error) {
+	report, err := c.cli.NetworksPrune(ctx, filters.NewArgs(
+		filters.Arg("label", "meghify.managed=true"),
+	))
+	if err != nil {
+		return 0, fmt.Errorf("prune networks: %w", err)
+	}
+	return len(report.NetworksDeleted), nil
 }
 
 // --- networks ---

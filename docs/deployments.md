@@ -156,11 +156,25 @@ quietly. These guards keep it in check:
   version is removed unless a container still references it.
 - **Hourly gc** — the panel's `gc` job also sweeps dangling images on both
   engines, the same pass that prunes old metrics rows.
+- **Scheduled cleanup on the server page** — the local server's **Docker
+  cleanup** section stores a five-field cron schedule, an optional host-disk
+  threshold, and opt-in volume/network removal in SQLite. A minute tick
+  enqueues a durable `docker_cleanup` job when the schedule is due, so the
+  schedule survives panel restarts. Application images keep the `IMAGE_KEEP`
+  rollback window, or only the images current containers reference when
+  **Remove retained images** is selected. Unused-volume and unused-network
+  removal is label-scoped to `meghify.managed=true`; unrelated Docker
+  resources never participate. Every scheduled and manual run is recorded
+  with its status, duration, reclaimed bytes and error in the server page's
+  **Recent executions** list.
 
 The dashboard's **Docker disk usage** card shows the four `docker system df`
 categories (images, build cache, volumes, containers), what the sandbox's own
-daemon holds, and the largest objects. **Free up space** runs the same cleanup
-pass on demand (`POST /api/docker/cleanup`).
+daemon holds, and the largest objects. **Free up space** runs a safe cleanup
+pass on demand (`POST /api/docker/cleanup`): it never applies the opt-in
+volume/network removal or the aggressive image-retention setting. The server
+page's **Run cleanup** button sends `?applyOptions=1` so the configured
+advanced options do apply there, and the same settings drive scheduled runs.
 
 ## Every release is confirmed
 

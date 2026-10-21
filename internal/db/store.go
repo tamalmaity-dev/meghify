@@ -13,28 +13,30 @@ import (
 type Store struct {
 	db *sql.DB
 
-	Users        *UserRepo
-	Nodes        *NodeRepo
-	Projects     *ProjectRepo
-	Applications *AppRepo
-	Resources    *ResourceRepo
-	Deployments  *DeploymentRepo
-	Jobs         *JobRepo
-	GitHub       *GitHubRepo
+	Users         *UserRepo
+	Nodes         *NodeRepo
+	Projects      *ProjectRepo
+	Applications  *AppRepo
+	Resources     *ResourceRepo
+	Deployments   *DeploymentRepo
+	Jobs          *JobRepo
+	GitHub        *GitHubRepo
+	DockerCleanup *DockerCleanupRepo
 }
 
 // OpenStore builds a Store from an already opened handle.
 func OpenStore(handle *sql.DB) *Store {
 	return &Store{
-		db:           handle,
-		Users:        &UserRepo{db: handle},
-		Nodes:        &NodeRepo{db: handle},
-		Projects:     &ProjectRepo{db: handle},
-		Applications: &AppRepo{db: handle},
-		Resources:    &ResourceRepo{db: handle},
-		Deployments:  &DeploymentRepo{db: handle},
-		Jobs:         &JobRepo{db: handle},
-		GitHub:       &GitHubRepo{db: handle},
+		db:            handle,
+		Users:         &UserRepo{db: handle},
+		Nodes:         &NodeRepo{db: handle},
+		Projects:      &ProjectRepo{db: handle},
+		Applications:  &AppRepo{db: handle},
+		Resources:     &ResourceRepo{db: handle},
+		Deployments:   &DeploymentRepo{db: handle},
+		Jobs:          &JobRepo{db: handle},
+		GitHub:        &GitHubRepo{db: handle},
+		DockerCleanup: &DockerCleanupRepo{db: handle},
 	}
 }
 
