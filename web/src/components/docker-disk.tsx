@@ -201,6 +201,10 @@ export function DockerDiskUsage() {
                     {cleanup.isPending ? "Cleaning up…" : "Free up space"}
                   </Button>
                 </div>
+                <p className="pt-1 text-[11px] leading-relaxed text-black/40 dark:text-white/35">
+                  Old panel-built images, superseded proxy versions and retired helpers are pruned
+                  automatically after releases, at startup and by the hourly GC.
+                </p>
               </div>
             </div>
 

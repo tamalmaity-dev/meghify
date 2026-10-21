@@ -95,10 +95,11 @@ type Config struct {
 	// still nixpacks' fallback when no engines field exists.
 	BuildDefaultNodeVersion string `env:"BUILD_DEFAULT_NODE_VERSION" envDefault:"22"`
 
-	// IMAGE_KEEP is how built images per application a cleanup keeps: the
-	// newest ones first. The image a running container serves from always
-	// survives regardless of the count.
-	ImageKeep int `env:"IMAGE_KEEP" envDefault:"2"`
+	// IMAGE_KEEP is how many built images per application a cleanup keeps:
+	// the newest ones first. The image a running container serves from always
+	// survives regardless of the count. Only images built by this panel are
+	// swept; operator-pulled images are left alone.
+	ImageKeep int `env:"IMAGE_KEEP" envDefault:"1"`
 
 	// BUILD_CACHE_KEEP bounds the Docker build cache (of the build sandbox
 	// and the engine), accepting suffix sizes like 512m or 8g. When the cache

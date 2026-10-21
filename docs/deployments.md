@@ -121,12 +121,14 @@ the same at boot (`initCancelDeployments`).
 ## Storage: images, build cache and cleanup
 
 Every build tags a fresh image stamp, so without care small VPS disks fill up
-quietly. Three guards keep it in check:
+quietly. These guards keep it in check:
 
-- **Release trim** — right after a successful release the application's image
-  repository is cut down to the `IMAGE_KEEP` (default **2**) newest tags. The
+- **Release trim** - right after a successful release the application's image
+  repository is cut down to the `IMAGE_KEEP` (default **1**) newest tags. The
   image the running container serves from is always protected; the engine
-  refuses anything else in use, which fails the sweep harmlessly.
+  refuses anything else in use, which fails the sweep harmlessly. Only images
+  stamped by this panel (`meghify.application`) are swept, so an operator's
+  own images on the same engine are left alone.
 - **Bounded build cache** — `BUILD_CACHE_KEEP` (default **8g**) caps the
   Docker build cache, on the engine and inside the build sandbox. The bound is
   enforced right after every release, not only at cleanup time, and a prune
@@ -137,6 +139,9 @@ quietly. Three guards keep it in check:
   `meghify-helper:v0.6.x` tags after an upgrade) are removed by every cleanup
   pass. A pinned `BUILD_HELPER_IMAGE` is exactly what survives; application
   repositories and images the operator brought themselves are out of scope.
+- **Superseded proxy images** - cleanup keeps only the configured
+  `PROXY_IMAGE` tag. After an upgrade from `traefik:v3.3` to `v3.7`, the old
+  version is removed unless a container still references it.
 - **Hourly gc** — the panel's `gc` job also sweeps dangling images on both
   engines, the same pass that prunes old metrics rows.
 

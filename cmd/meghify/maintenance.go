@@ -140,7 +140,7 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 			}
 		}
 	}
-	result, err := deploy.CleanupEngine(ctx, client, protect, cfg.ImageKeep, cfg.BuildCacheKeepBytes(), cfg.EffectiveHelperImage())
+	result, err := deploy.CleanupEngine(ctx, client, protect, cfg.ImageKeep, cfg.BuildCacheKeepBytes(), cfg.EffectiveHelperImage(), cfg.ProxyImage)
 	if (result.Reclaimed > 0 || result.ImagesRemoved > 0) && logger != nil {
 		logger.Info("docker cleanup reclaimed storage",
 			"bytes", result.Reclaimed, "images", result.ImagesRemoved, "sandbox", result.Sandbox)

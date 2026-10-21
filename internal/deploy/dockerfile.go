@@ -635,8 +635,9 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 	p.store.Applications.PatchApplicationStatus(ctx, app.ID, db.StatusRunning)
 
 	// Every build tags a fresh stamp, so the repository grows forever without
-	// a trim: drop everything but the newest two (the engine refuses images a
-	// running container still uses, which is the safety valve here).
+	// a trim: drop everything beyond the configured retention count (the
+	// engine refuses images a running container still uses, which is the
+	// safety valve here).
 	p.trimReleaseImages(ctx, sink, app, imageRef)
 	// The cache bound is otherwise enforced only by the GC job; a busy build
 	// can push the cache past it between two passes.
@@ -653,9 +654,9 @@ func (p *Pipeline) trimReleaseImages(ctx context.Context, sink io.Writer, app *d
 	}
 	keep := p.imageKeep
 	if keep < 1 {
-		keep = 2
+		keep = 1
 	}
-	reclaimed, removed, err := p.client.PruneImageRepos(ctx, keep, map[string]struct{}{current: {}})
+	reclaimed, removed, err := p.client.PruneManagedImages(ctx, docker.RepoOf(current), keep, map[string]struct{}{current: {}})
 	if err != nil || removed == 0 {
 		return
 	}

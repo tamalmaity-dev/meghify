@@ -126,7 +126,7 @@ type Pipeline struct {
 	// deployTimeout bounds one whole deployment.
 	deployTimeout time.Duration
 	// imageKeep drives the post-release image trim: keep N newest images per
-	// application repository. Zero falls back to 2.
+	// application repository. Zero falls back to 1.
 	imageKeep int
 	// buildCacheKeep drives the post-release cache trim; zero leaves the
 	// cache unbounded.

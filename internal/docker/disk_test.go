@@ -16,6 +16,48 @@ func summary(id string, repo string, tag string, created time.Time, size int64) 
 	}
 }
 
+func managedSummary(id string, repo string, tag string, created time.Time, size int64) image.Summary {
+	managed := summary(id, repo, tag, created, size)
+	managed.Labels = map[string]string{managedApplicationLabel: "app-1"}
+	return managed
+}
+
+// The application-image sweep must never touch an operator-pulled image or
+// the panel's own pinned runtime images. Docker's "docker" repository is the
+// sharp edge here: it contains both the sandbox and terminal helper images.
+func TestSelectManagedImagesOnlyPanelBuilds(t *testing.T) {
+	base := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		managedSummary("id-app-old", "meghify.local/roopsa-web", "bf50f017-1", base.Add(-time.Hour), 2<<30),
+		managedSummary("id-app-new", "meghify.local/roopsa-web", "5226b772-2", base, 2<<30),
+		summary("id-traefik-old", "traefik", "v3.3", base.Add(-48*time.Hour), 272<<20),
+		summary("id-traefik-new", "traefik", "v3.7", base, 241<<20),
+		summary("id-terminal", "docker", "27-cli", base.Add(-96*time.Hour), 265<<20),
+		summary("id-dind", "docker", "29-dind", base, 441<<20),
+	}
+
+	managed := selectManagedImages(images, "")
+	if len(managed) != 2 {
+		t.Fatalf("managed = %+v, want only the two application images", managed)
+	}
+	for _, item := range managed {
+		if item.Labels[managedApplicationLabel] == "" {
+			t.Fatalf("foreign image leaked into the sweep: %+v", item)
+		}
+	}
+	if scoped := selectManagedImages(images, "meghify.local/roopsa-web"); len(scoped) != 2 {
+		t.Fatalf("scoped managed = %+v, want both images of the application repository", scoped)
+	}
+	if scoped := selectManagedImages(images, "traefik"); len(scoped) != 0 {
+		t.Fatalf("scoped foreign = %+v, want none", scoped)
+	}
+
+	victims := selectReposToPrune(managed, 1, nil)
+	if len(victims) != 1 || victims[0].Tags[0] != "meghify.local/roopsa-web:bf50f017-1" {
+		t.Fatalf("victims = %+v, want only the old application image", victims)
+	}
+}
+
 // Each build tags a fresh stamp, so the repository grows one image per build:
 // keep must retain the newest and drop older ones, oldest first.
 func TestSelectReposToPruneKeepsNewest(t *testing.T) {
@@ -165,6 +207,21 @@ func TestSelectRepoExceptionsKeepsCurrentHelper(t *testing.T) {
 		if victim.Bytes != 276<<20 {
 			t.Errorf("victim bytes = %d, want the image size", victim.Bytes)
 		}
+	}
+}
+
+// An upgraded panel keeps the configured proxy tag and removes the previous
+// Traefik release from the shared repository.
+func TestSelectRepoExceptionsKeepsCurrentProxy(t *testing.T) {
+	base := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	images := []image.Summary{
+		summary("id-old-proxy", "traefik", "v3.3", base.Add(-48*time.Hour), 272<<20),
+		summary("id-new-proxy", "traefik", "v3.7", base, 241<<20),
+	}
+
+	victims := selectRepoExceptions(images, "traefik", "traefik:v3.7")
+	if len(victims) != 1 || victims[0].Tags[0] != "traefik:v3.3" {
+		t.Fatalf("victims = %+v, want only the superseded proxy", victims)
 	}
 }
 

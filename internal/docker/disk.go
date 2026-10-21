@@ -9,8 +9,14 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 )
+
+// managedApplicationLabel is stamped on every image the deployment pipeline
+// builds. Cleanup uses it to stay away from images an operator pulled
+// themselves, even though they share the same engine and repository names.
+const managedApplicationLabel = "meghify.application"
 
 // DiskUsageReport breaks the engine's disk usage into the four categories the
 // dashboard renders. Images is the engine's own accounting of unique layer
@@ -86,6 +92,7 @@ func (c *Client) DiskUsageDetail(ctx context.Context) (DiskUsageReport, []UsageI
 // the bytes its image carries. Removing the tags untags them from that
 // repository; the engine only frees layers once no reference remains.
 type pruneCandidate struct {
+	ID    string
 	Tags  []string
 	Bytes int64
 }
@@ -102,23 +109,7 @@ func (c *Client) PruneRepoExcept(ctx context.Context, repo string, keepTag strin
 		return 0, 0, fmt.Errorf("list images: %w", err)
 	}
 
-	reclaimed, removed := int64(0), 0
-	for _, victim := range selectRepoExceptions(list, repo, keepTag) {
-		failed := false
-		for _, tag := range victim.Tags {
-			if err := c.RemoveImage(ctx, tag); err != nil {
-				// A container (a running build helper, for example) still
-				// uses this image — leave the whole thing for the next pass.
-				failed = true
-				break
-			}
-		}
-		if failed {
-			continue
-		}
-		removed++
-		reclaimed += victim.Bytes
-	}
+	reclaimed, removed := c.removeCandidates(ctx, selectRepoExceptions(list, repo, keepTag), nil)
 	return reclaimed, removed, nil
 }
 
@@ -139,18 +130,21 @@ func selectRepoExceptions(images []image.Summary, repo string, keepTag string) [
 		}
 		// Removing only this repository's tags is safe either way: references
 		// outside it (other tags on the same image) keep the layers alive.
-		victims = append(victims, pruneCandidate{Tags: repoTags, Bytes: summary.Size})
+		victims = append(victims, pruneCandidate{ID: summary.ID, Tags: repoTags, Bytes: summary.Size})
 	}
 	return victims
 }
 
-// PruneImageRepos keeps the newest keep images of every repository that still
-// carries at least one tag (each build is tagged with a fresh stamp, so
-// repositories otherwise grow forever) and removes the rest. Tags listed in
-// protect always survive, and images a container uses refuse deletion — those
-// failures are skipped, not fatal. Returns an estimated reclaimed byte count
-// and the number of images removed.
-func (c *Client) PruneImageRepos(ctx context.Context, keep int, protect map[string]struct{}) (int64, int, error) {
+// PruneManagedImages keeps the newest keep images of every application
+// repository that still carries at least one tag (each build is tagged with a
+// fresh stamp, so repositories otherwise grow forever) and removes the rest.
+// A non-empty repo limits the sweep to that application repository. Only
+// images stamped by this panel are considered, so operator-pulled images are
+// never part of the sweep. Tags listed in protect always survive, and
+// images a container uses refuse deletion — those failures are skipped, not
+// fatal. Returns an estimated reclaimed byte count and the number of images
+// removed.
+func (c *Client) PruneManagedImages(ctx context.Context, repo string, keep int, protect map[string]struct{}) (int64, int, error) {
 	if keep < 1 {
 		keep = 1
 	}
@@ -158,9 +152,59 @@ func (c *Client) PruneImageRepos(ctx context.Context, keep int, protect map[stri
 	if err != nil {
 		return 0, 0, fmt.Errorf("list images: %w", err)
 	}
+	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return 0, 0, fmt.Errorf("list containers: %w", err)
+	}
+	// Protect by image ID as well as tag: a dangling or retagged image can
+	// still be the one a live or stopped container was created from.
+	protectedIDs := make(map[string]struct{}, len(containers))
+	for _, item := range containers {
+		if item.ImageID != "" {
+			protectedIDs[item.ImageID] = struct{}{}
+		}
+	}
 
+	reclaimed, removed := c.removeCandidates(ctx, selectReposToPrune(selectManagedImages(list, repo), keep, protect), protectedIDs)
+	return reclaimed, removed, nil
+}
+
+// selectManagedImages limits a retention sweep to images the panel built.
+// Foreign images on the same engine (Traefik, Docker CLI, a developer's own
+// builds) are deliberately excluded; the proxy and retired helper
+// repositories have their own narrow sweeps. An empty repo means every
+// application repository.
+func selectManagedImages(images []image.Summary, repo string) []image.Summary {
+	managed := make([]image.Summary, 0, len(images))
+	for _, summary := range images {
+		if summary.Labels[managedApplicationLabel] == "" {
+			continue
+		}
+		if repo == "" || imageInRepo(summary, repo) {
+			managed = append(managed, summary)
+		}
+	}
+	return managed
+}
+
+func imageInRepo(summary image.Summary, repo string) bool {
+	for _, tag := range summary.RepoTags {
+		if repoOf(tag) == repo {
+			return true
+		}
+	}
+	return false
+}
+
+// removeCandidates deletes the tags of each victim. The engine refuses
+// images referenced by any container; those candidates are left for a later
+// pass, and protectedIDs catches the same case before the API call.
+func (c *Client) removeCandidates(ctx context.Context, victims []pruneCandidate, protectedIDs map[string]struct{}) (int64, int) {
 	reclaimed, removed := int64(0), 0
-	for _, victim := range selectReposToPrune(list, keep, protect) {
+	for _, victim := range victims {
+		if _, ok := protectedIDs[victim.ID]; ok {
+			continue
+		}
 		failed := false
 		for _, tag := range victim.Tags {
 			if err := c.RemoveImage(ctx, tag); err != nil {
@@ -176,7 +220,7 @@ func (c *Client) PruneImageRepos(ctx context.Context, keep int, protect map[stri
 		removed++
 		reclaimed += victim.Bytes
 	}
-	return reclaimed, removed, nil
+	return reclaimed, removed
 }
 
 // selectReposToPrune decides which tags a retention sweep removes. Every
@@ -225,7 +269,7 @@ func selectReposToPrune(images []image.Summary, keep int, protect map[string]str
 			if protected(entry.summary, protect) {
 				continue
 			}
-			candidate := pruneCandidate{Bytes: entry.summary.Size}
+			candidate := pruneCandidate{ID: entry.summary.ID, Bytes: entry.summary.Size}
 			// Untag every reference in this repository — an image tagged twice
 			// under the same repo keeps layers alive through the second tag.
 			for _, tag := range entry.summary.RepoTags {

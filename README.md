@@ -266,6 +266,7 @@ default. The ones that matter:
 | `DATA_DIR` | `/data` | Holds the database, build logs, and workspaces. |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | The engine the panel talks to. |
 | `DOCKER_GID` | (required in Compose) | Host group that owns the Docker socket, so the nonroot container can use it. |
+| `IMAGE_KEEP` | `1` | Built images retained per application; the running container's image is always protected. |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` only behind your own reverse proxy. |
 | `WORKER_CONCURRENCY` | `4` | Concurrent jobs. |
 | `REGISTRY_URL` | (empty) | When set, built images are pushed. When empty, they stay on the build node. |

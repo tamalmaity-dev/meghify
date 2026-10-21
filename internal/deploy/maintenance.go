@@ -41,10 +41,10 @@ type CleanupResult struct {
 // CleanupEngine reclaims Docker storage everywhere the panel is responsible
 // for it: dangling images, application images past the retention count, the
 // build cache — on the engine and inside the build sandbox — and superseded
-// helper image versions. Failures are joined into the returned error while
-// every remaining step still runs, so a sandbox hiccup cannot block an engine
-// cleanup.
-func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, imageKeep int, cacheKeep int64, helperImage string) (CleanupResult, error) {
+// helper and proxy image versions. Failures are joined into the returned error
+// while every remaining step still runs, so a sandbox hiccup cannot block an
+// engine cleanup.
+func CleanupEngine(ctx context.Context, client *docker.Client, protect map[string]struct{}, imageKeep int, cacheKeep int64, helperImage, proxyImage string) (CleanupResult, error) {
 	var result CleanupResult
 	if client == nil {
 		return result, nil
@@ -58,7 +58,7 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 		result.Reclaimed += bytes
 	}
 
-	if bytes, removed, err := client.PruneImageRepos(ctx, imageKeep, protect); err != nil {
+	if bytes, removed, err := client.PruneManagedImages(ctx, "", imageKeep, protect); err != nil {
 		errs = append(errs, err)
 	} else {
 		result.Reclaimed += bytes
@@ -91,6 +91,12 @@ func CleanupEngine(ctx context.Context, client *docker.Client, protect map[strin
 		if repo != currentHelperRepo {
 			pruneRepo(repo, "")
 		}
+	}
+	// The proxy repository is shared with upstream tags, so keep the exact
+	// configured reference. Upgrading from traefik:v3.3 to v3.7 is the common
+	// case: the old layer set is no longer referenced and can go.
+	if proxyRepo := docker.RepoOf(proxyImage); proxyRepo != "" && proxyRepo != currentHelperRepo {
+		pruneRepo(proxyRepo, proxyImage)
 	}
 
 	if cacheKeep > 0 {
