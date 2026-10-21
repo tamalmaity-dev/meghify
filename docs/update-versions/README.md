@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.9.0](0.9.0.md) | 2026-10-22 | Resource Guard for sustained CPU/memory pressure, host-memory emergency stop, per-application overrides, live CPU/memory limit updates |
 | [0.8.0](0.8.0.md) | 2026-10-22 | Terminal page for servers and running containers, idle keepalive/reconnect, terminal themes and font controls, configurable Docker cleanup schedule with history |
 | [0.7.3](0.7.3.md) | 2026-10-21 | Stop the idle build sandbox to release memory, reclaim orphaned application images, and remove every Meghify Docker resource on uninstall |
 | [0.7.2](0.7.2.md) | 2026-10-21 | Remove superseded application and proxy images automatically; only panel-built images are swept, current containers stay protected |

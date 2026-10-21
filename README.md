@@ -35,6 +35,9 @@ Meghify (Go + SQLite)       ~16 MB           ~0%             1
 - **Open a shell** on any server or inside any running container from the
   Terminal page, with a keepalive connection, reconnect, themes and font
   controls (admins).
+- **Protect the host** with per-application CPU and memory limits plus a
+  resource guard that throttles or stops application containers after sustained
+  pressure (admins).
 - **Automate work** with a durable job queue that needs no Redis.
 
 ---
@@ -256,6 +259,9 @@ on `:5173` and proxies `/api` and the SSE stream to the Go panel on `:8080`.
 | `GET` `/api/nodes/{id}/containers/{containerId}/terminal` | Container shell (WebSocket, admin) |
 | `GET/PUT` `/api/docker/cleanup` | Docker cleanup schedule and options (admin) |
 | `GET` `/api/docker/cleanup/history` | Recent cleanup executions (admin) |
+| `GET/PUT` `/api/resource-guard/settings` | Panel-wide CPU/memory protection policy (admin) |
+| `GET` `/api/resource-guard/events` | Resource-guard action history (admin) |
+| `POST` `/api/applications/{id}/apply-limits` | Push saved CPU/memory limits to the running container (admin) |
 | `GET` `/openapi.json` | API schema (planned) |
 
 ---

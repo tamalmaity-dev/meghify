@@ -30,12 +30,18 @@ type applicationRequest struct {
 	NodeID        string `json:"nodeId"`
 	FQDN          string `json:"fqdn"`
 	// Runtime settings from the Networking and Runtime cards.
-	PortMappings      string  `json:"portMappings"`
-	RedirectHTTPS     *bool   `json:"redirectHttps"`
-	CPULimit          float64 `json:"cpuLimit"`
-	MemoryLimit       int64   `json:"memoryLimit"`
-	PreDeployCommand  string  `json:"preDeployCommand"`
-	PostDeployCommand string  `json:"postDeployCommand"`
+	PortMappings  string  `json:"portMappings"`
+	RedirectHTTPS *bool   `json:"redirectHttps"`
+	CPULimit      float64 `json:"cpuLimit"`
+	MemoryLimit   int64   `json:"memoryLimit"`
+	// Resource guard overrides; empty/zero inherits the panel policy.
+	ResourceGuardEnabled       *bool  `json:"resourceGuardEnabled"`
+	ResourceGuardCPUAction     string `json:"resourceGuardCpuAction"`
+	ResourceGuardMemoryAction  string `json:"resourceGuardMemoryAction"`
+	ResourceGuardCPUPercent    int    `json:"resourceGuardCpuPercent"`
+	ResourceGuardMemoryPercent int    `json:"resourceGuardMemoryPercent"`
+	PreDeployCommand           string `json:"preDeployCommand"`
+	PostDeployCommand          string `json:"postDeployCommand"`
 	// GitHub linkage, set when the application is created from the GitHub App
 	// repository picker. AutoDeploy defaults to true for those applications.
 	GitHubInstallationID int64  `json:"githubInstallationId"`
@@ -66,10 +72,40 @@ func (req applicationRequest) validate() error {
 	if req.MemoryLimit < 0 {
 		return errValidation("memory limit cannot be negative")
 	}
+	if err := validateGuardCPUAction(req.ResourceGuardCPUAction); err != nil {
+		return err
+	}
+	if err := validateGuardMemoryAction(req.ResourceGuardMemoryAction); err != nil {
+		return err
+	}
+	if req.ResourceGuardCPUPercent < 0 || req.ResourceGuardCPUPercent > 100 {
+		return errValidation("resource guard CPU threshold must be between 0 and 100 percent")
+	}
+	if req.ResourceGuardMemoryPercent < 0 || req.ResourceGuardMemoryPercent > 100 {
+		return errValidation("resource guard memory threshold must be between 0 and 100 percent")
+	}
 	if _, err := parsePortMappings(req.PortMappings); err != nil {
 		return err
 	}
 	return nil
+}
+
+func validateGuardCPUAction(action string) error {
+	switch strings.TrimSpace(action) {
+	case "", db.GuardActionNotify, db.GuardActionThrottle, db.GuardActionStop:
+		return nil
+	default:
+		return errValidation("resource guard CPU action must be notify, throttle or stop")
+	}
+}
+
+func validateGuardMemoryAction(action string) error {
+	switch strings.TrimSpace(action) {
+	case "", db.GuardActionNotify, db.GuardActionStop:
+		return nil
+	default:
+		return errValidation("resource guard memory action must be notify or stop")
+	}
 }
 
 // parsePortMappings accepts "8080:3000" or a comma/space separated list of
@@ -189,26 +225,31 @@ func (s *Server) createApplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app := &db.Application{
-		ID:                db.NewID(),
-		EnvironmentID:     envID,
-		Name:              strings.TrimSpace(req.Name),
-		Description:       req.Description,
-		GitRepository:     req.GitRepository,
-		GitBranch:         valueOr(req.GitBranch, "main"),
-		BuildPack:         buildPack,
-		Dockerfile:        dockerfile,
-		BaseDirectory:     baseDirectory,
-		Port:              valueOr(req.Port, 3000),
-		HealthCheck:       healthCheck,
-		NodeID:            strings.TrimSpace(req.NodeID),
-		FQDN:              strings.ToLower(strings.TrimSpace(req.FQDN)),
-		Status:            db.StatusIdle,
-		PortMappings:      strings.TrimSpace(req.PortMappings),
-		RedirectHTTPS:     req.RedirectHTTPS == nil || *req.RedirectHTTPS,
-		CPULimit:          req.CPULimit,
-		MemoryLimit:       req.MemoryLimit,
-		PreDeployCommand:  strings.TrimSpace(req.PreDeployCommand),
-		PostDeployCommand: strings.TrimSpace(req.PostDeployCommand),
+		ID:                         db.NewID(),
+		EnvironmentID:              envID,
+		Name:                       strings.TrimSpace(req.Name),
+		Description:                req.Description,
+		GitRepository:              req.GitRepository,
+		GitBranch:                  valueOr(req.GitBranch, "main"),
+		BuildPack:                  buildPack,
+		Dockerfile:                 dockerfile,
+		BaseDirectory:              baseDirectory,
+		Port:                       valueOr(req.Port, 3000),
+		HealthCheck:                healthCheck,
+		NodeID:                     strings.TrimSpace(req.NodeID),
+		FQDN:                       strings.ToLower(strings.TrimSpace(req.FQDN)),
+		Status:                     db.StatusIdle,
+		PortMappings:               strings.TrimSpace(req.PortMappings),
+		RedirectHTTPS:              req.RedirectHTTPS == nil || *req.RedirectHTTPS,
+		CPULimit:                   req.CPULimit,
+		MemoryLimit:                req.MemoryLimit,
+		ResourceGuardEnabled:       req.ResourceGuardEnabled == nil || *req.ResourceGuardEnabled,
+		ResourceGuardCPUAction:     strings.TrimSpace(req.ResourceGuardCPUAction),
+		ResourceGuardMemoryAction:  strings.TrimSpace(req.ResourceGuardMemoryAction),
+		ResourceGuardCPUPercent:    req.ResourceGuardCPUPercent,
+		ResourceGuardMemoryPercent: req.ResourceGuardMemoryPercent,
+		PreDeployCommand:           strings.TrimSpace(req.PreDeployCommand),
+		PostDeployCommand:          strings.TrimSpace(req.PostDeployCommand),
 	}
 	if req.GitHubInstallationID > 0 {
 		if err := s.linkGitHubRepository(r, app, req); err != nil {
@@ -288,23 +329,28 @@ func (s *Server) getApplication(w http.ResponseWriter, r *http.Request) {
 // GitHub auto-deploy switch) overwrite every unrelated column with a zero
 // value. PUT and PATCH share this handler; both are now partial-safe.
 type applicationPatchRequest struct {
-	Name              *string  `json:"name"`
-	Description       *string  `json:"description"`
-	GitRepository     *string  `json:"gitRepository"`
-	GitBranch         *string  `json:"gitBranch"`
-	BuildPack         *string  `json:"buildPack"`
-	Dockerfile        *string  `json:"dockerfile"`
-	BaseDirectory     *string  `json:"baseDirectory"`
-	Port              *int     `json:"port"`
-	HealthCheck       *string  `json:"healthCheck"`
-	NodeID            *string  `json:"nodeId"`
-	PortMappings      *string  `json:"portMappings"`
-	RedirectHTTPS     *bool    `json:"redirectHttps"`
-	CPULimit          *float64 `json:"cpuLimit"`
-	MemoryLimit       *int64   `json:"memoryLimit"`
-	PreDeployCommand  *string  `json:"preDeployCommand"`
-	PostDeployCommand *string  `json:"postDeployCommand"`
-	AutoDeploy        *bool    `json:"autoDeploy"`
+	Name                       *string  `json:"name"`
+	Description                *string  `json:"description"`
+	GitRepository              *string  `json:"gitRepository"`
+	GitBranch                  *string  `json:"gitBranch"`
+	BuildPack                  *string  `json:"buildPack"`
+	Dockerfile                 *string  `json:"dockerfile"`
+	BaseDirectory              *string  `json:"baseDirectory"`
+	Port                       *int     `json:"port"`
+	HealthCheck                *string  `json:"healthCheck"`
+	NodeID                     *string  `json:"nodeId"`
+	PortMappings               *string  `json:"portMappings"`
+	RedirectHTTPS              *bool    `json:"redirectHttps"`
+	CPULimit                   *float64 `json:"cpuLimit"`
+	MemoryLimit                *int64   `json:"memoryLimit"`
+	ResourceGuardEnabled       *bool    `json:"resourceGuardEnabled"`
+	ResourceGuardCPUAction     *string  `json:"resourceGuardCpuAction"`
+	ResourceGuardMemoryAction  *string  `json:"resourceGuardMemoryAction"`
+	ResourceGuardCPUPercent    *int     `json:"resourceGuardCpuPercent"`
+	ResourceGuardMemoryPercent *int     `json:"resourceGuardMemoryPercent"`
+	PreDeployCommand           *string  `json:"preDeployCommand"`
+	PostDeployCommand          *string  `json:"postDeployCommand"`
+	AutoDeploy                 *bool    `json:"autoDeploy"`
 }
 
 func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
@@ -320,6 +366,8 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	limitsChanged := false
+	guardChanged := false
 
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -416,14 +464,68 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "cpu limit cannot be negative")
 			return
 		}
-		existing.CPULimit = *req.CPULimit
+		if *req.CPULimit != existing.CPULimit {
+			existing.CPULimit = *req.CPULimit
+			limitsChanged = true
+		}
 	}
 	if req.MemoryLimit != nil {
 		if *req.MemoryLimit < 0 {
 			writeError(w, http.StatusBadRequest, "memory limit cannot be negative")
 			return
 		}
-		existing.MemoryLimit = *req.MemoryLimit
+		if *req.MemoryLimit != existing.MemoryLimit {
+			existing.MemoryLimit = *req.MemoryLimit
+			limitsChanged = true
+		}
+	}
+	if req.ResourceGuardEnabled != nil {
+		if *req.ResourceGuardEnabled != existing.ResourceGuardEnabled {
+			existing.ResourceGuardEnabled = *req.ResourceGuardEnabled
+			guardChanged = true
+		}
+	}
+	if req.ResourceGuardCPUAction != nil {
+		action := strings.TrimSpace(*req.ResourceGuardCPUAction)
+		if err := validateGuardCPUAction(action); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if action != existing.ResourceGuardCPUAction {
+			existing.ResourceGuardCPUAction = action
+			guardChanged = true
+		}
+	}
+	if req.ResourceGuardMemoryAction != nil {
+		action := strings.TrimSpace(*req.ResourceGuardMemoryAction)
+		if err := validateGuardMemoryAction(action); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if action != existing.ResourceGuardMemoryAction {
+			existing.ResourceGuardMemoryAction = action
+			guardChanged = true
+		}
+	}
+	if req.ResourceGuardCPUPercent != nil {
+		if *req.ResourceGuardCPUPercent < 0 || *req.ResourceGuardCPUPercent > 100 {
+			writeError(w, http.StatusBadRequest, "resource guard CPU threshold must be between 0 and 100 percent")
+			return
+		}
+		if *req.ResourceGuardCPUPercent != existing.ResourceGuardCPUPercent {
+			existing.ResourceGuardCPUPercent = *req.ResourceGuardCPUPercent
+			guardChanged = true
+		}
+	}
+	if req.ResourceGuardMemoryPercent != nil {
+		if *req.ResourceGuardMemoryPercent < 0 || *req.ResourceGuardMemoryPercent > 100 {
+			writeError(w, http.StatusBadRequest, "resource guard memory threshold must be between 0 and 100 percent")
+			return
+		}
+		if *req.ResourceGuardMemoryPercent != existing.ResourceGuardMemoryPercent {
+			existing.ResourceGuardMemoryPercent = *req.ResourceGuardMemoryPercent
+			guardChanged = true
+		}
 	}
 	if req.PreDeployCommand != nil {
 		existing.PreDeployCommand = strings.TrimSpace(*req.PreDeployCommand)
@@ -451,6 +553,14 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Applications.UpdateApplication(r.Context(), existing); err != nil {
 		mapError(w, err)
 		return
+	}
+	if limitsChanged || (guardChanged && !existing.ResourceGuardEnabled) {
+		// Turning protection off also lifts a temporary CPU throttle so the
+		// saved limits take effect immediately, even without a redeploy.
+		s.applyApplicationResources(r.Context(), existing)
+	}
+	if s.guard != nil && (limitsChanged || guardChanged) {
+		s.guard.ResetApplication(existing.ID)
 	}
 	s.syncRoutes(r.Context(), id)
 	s.audit(r.Context(), r, "application.update", "application", id, nil)
@@ -493,6 +603,60 @@ func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- domains ---
+
+// applyApplicationLimitsNow forces the saved CPU/memory ceilings onto the
+// running container. This is also how an operator clears a temporary
+// resource-guard throttle without redeploying.
+func (s *Server) applyApplicationLimitsNow(w http.ResponseWriter, r *http.Request) {
+	app, err := s.store.Applications.ApplicationByID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	if err := s.pushApplicationResources(r.Context(), app); err != nil {
+		switch {
+		case errors.Is(err, errNoContainer):
+			writeError(w, http.StatusConflict, "the application has no running container; deploy it first")
+		case errors.Is(err, errNoEngine), errors.Is(err, errEngineUnavailable):
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if s.guard != nil {
+		s.guard.ResetApplication(app.ID)
+	}
+	s.audit(r.Context(), r, "application.apply_limits", "application", app.ID, nil)
+	writeJSON(w, http.StatusOK, app)
+}
+
+// applyApplicationResources pushes changed CPU/memory ceilings to an existing
+// container immediately. The database remains the source of truth if the
+// engine is temporarily unavailable; the next deploy recreates the container
+// with the same limits anyway.
+func (s *Server) applyApplicationResources(ctx context.Context, app *db.Application) {
+	if err := s.pushApplicationResources(ctx, app); err != nil {
+		s.logger.Debug("could not apply application limits", "application", app.ID, "error", err)
+	}
+}
+
+// pushApplicationResources is the strict form used by the explicit Apply
+// limits button on the Runtime card.
+func (s *Server) pushApplicationResources(ctx context.Context, app *db.Application) error {
+	client, err := s.clientForNode(ctx, app.NodeID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errEngineUnavailable, err)
+	}
+	container, err := client.ContainerByName(ctx, deploy.ContainerName(app))
+	if err != nil {
+		return fmt.Errorf("%w: %v", errEngineUnavailable, err)
+	}
+	if container == nil {
+		return errNoContainer
+	}
+	return client.UpdateContainerResources(ctx, container.ID, app.CPULimit, app.MemoryLimit)
+}
 
 // syncRoutes pushes the application's routing file to the proxy; failures are
 // logged, never fatal — the proxy keeps serving the last good file until a

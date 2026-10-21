@@ -297,8 +297,11 @@ finishes.
 - **Networking** — the container port the proxy routes to, published
   `hostPort:containerPort` mappings, and the routing configuration the proxy
   serves (read-only; it updates immediately when the Domains card changes).
-- **Runtime** — CPU and memory ceilings for the container, and the
-  pre/post-deployment command hooks.
+- **Runtime** — CPU and memory ceilings for the container, the
+  pre/post-deployment command hooks, and per-application resource-guard
+  overrides. Saved limits are pushed to a running container immediately where
+  the engine is reachable; **Apply limits now** forces them onto the current
+  container without a redeploy.
 - **Danger zone** — a two-step delete: pick the cleanup options (volumes,
   networks, server configuration files, Docker cleanup of unused images and
   the builder cache), then type the resource name to confirm. The container is
@@ -306,6 +309,36 @@ finishes.
   selected resources are cleaned up.
 - The header's **Actions** menu redeploys with or without cache, restarts and
   stops the application.
+
+## Resource protection
+
+The panel-wide policy lives on the **local server page → Resource protection**
+and applies to application containers on every managed server. It is a
+backstop for applications whose own CPU or memory ceilings are missing or too
+generous:
+
+- **CPU** is measured as a percentage of total host CPU and must remain above
+  the threshold for the whole duration. The default is 90% for 10 minutes,
+  which throttles the container and records a notification. Per-application
+  overrides can choose notify, throttle or stop.
+- **Memory** is measured against the container limit, or host RAM when no
+  limit is set. The default is 90% of the limit for 5 minutes, which stops the
+  container. A stopped-by-guard application stays stopped; it is not
+  auto-restarted.
+- **Host memory emergency** watches the whole machine. At 95% for 2 minutes it
+  stops the largest protected application on that server, even if that
+  application was below its own threshold.
+- New containers get a five-minute start grace period. After an action the
+  application enters a cooldown before the guard can act again.
+- The guard skips applications during deployment. Services, databases, the
+  panel, proxy, build sandbox and terminal helpers are never targets.
+- The guard samples every 30 seconds. It is not a replacement for hard
+  per-container limits: cgroups act every instant, while the guard confirms
+  sustained pressure first.
+
+CPU throttling changes the live container only. The saved limit returns on the
+next deployment, or immediately with **Apply limits now**. Compose stacks are
+currently managed as a stack and are not individually guarded.
 
 ## See also
 

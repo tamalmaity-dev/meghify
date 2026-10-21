@@ -127,6 +127,11 @@ func collectGarbage(ctx context.Context, store *db.Store, client *docker.Client,
 	if _, err := store.DockerCleanup.PruneRuns(ctx, time.Now().AddDate(0, 0, -90)); err != nil && logger != nil {
 		logger.Warn("could not prune docker cleanup history", "error", err)
 	}
+	// Resource-guard actions are diagnostic history like cleanup runs. Keep
+	// three months so an incident can still be investigated later.
+	if _, err := store.ResourceGuard.PruneEvents(ctx, time.Now().AddDate(0, 0, -90)); err != nil && logger != nil {
+		logger.Warn("could not prune resource guard history", "error", err)
+	}
 	// Host-metrics sampling no longer enters the queue, but panels upgraded from
 	// older releases still hold thousands of rows: clear them within the hour.
 	if _, err := store.Jobs.PruneJobsByKind(ctx, db.JobNodeMetrics, time.Now().Add(-time.Hour)); err != nil {

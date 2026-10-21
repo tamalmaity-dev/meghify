@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -172,6 +173,16 @@ type ContainerInfo struct {
 	Labels  map[string]string `json:"labels"`
 	Ports   []string          `json:"ports"`
 	Created int64             `json:"created"`
+}
+
+// ContainerUsage is one resource sample for a container. CPUPercent is a
+// percentage of total host CPU capacity (0-100), so it is directly comparable
+// to a host threshold. MemoryBytes is the working set with reclaimable page
+// cache removed where the kernel exposes it.
+type ContainerUsage struct {
+	CPUPercent  float64
+	MemoryBytes int64
+	MemoryLimit int64
 }
 
 // CreateContainer creates a container without starting it.
@@ -339,6 +350,86 @@ func (c *Client) RestartContainer(ctx context.Context, id string, timeout time.D
 	}
 	if err := c.cli.ContainerRestart(ctx, id, container.StopOptions{Timeout: &seconds}); err != nil {
 		return fmt.Errorf("restart container: %w", err)
+	}
+	return nil
+}
+
+// ContainerUsage reads one stats sample. The non-streaming form primes the CPU
+// counters with a second internal sample, so the returned percentage is usable
+// without keeping a stream open for every application container.
+func (c *Client) ContainerUsage(ctx context.Context, id string) (*ContainerUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	reader, err := c.cli.ContainerStats(ctx, id, false)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, ErrNoSuchContainer
+		}
+		return nil, fmt.Errorf("container stats: %w", err)
+	}
+	defer reader.Body.Close()
+
+	var stats container.StatsResponse
+	if err := json.NewDecoder(reader.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decode container stats: %w", err)
+	}
+	return usageFromStats(&stats), nil
+}
+
+// usageFromStats separates the engine payload from the math so the CPU and
+// memory formulas can be tested without a Docker daemon.
+func usageFromStats(stats *container.StatsResponse) *ContainerUsage {
+	usage := &ContainerUsage{
+		MemoryBytes: int64(stats.MemoryStats.Usage),
+		MemoryLimit: int64(stats.MemoryStats.Limit),
+	}
+	if cache, ok := stats.MemoryStats.Stats["inactive_file"]; ok && usage.MemoryBytes > int64(cache) {
+		usage.MemoryBytes -= int64(cache)
+	} else if cache, ok := stats.MemoryStats.Stats["cache"]; ok && usage.MemoryBytes > int64(cache) {
+		usage.MemoryBytes -= int64(cache)
+	}
+	if usage.MemoryBytes < 0 {
+		usage.MemoryBytes = 0
+	}
+
+	var cpuDelta, systemDelta uint64
+	if stats.CPUStats.CPUUsage.TotalUsage > stats.PreCPUStats.CPUUsage.TotalUsage {
+		cpuDelta = stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage
+	}
+	if stats.CPUStats.SystemUsage > stats.PreCPUStats.SystemUsage {
+		systemDelta = stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage
+	}
+	if systemDelta > 0 && cpuDelta > 0 {
+		// cpuDelta/systemDelta is the fraction of all host CPU time consumed,
+		// which is already 0-100 when multiplied by 100. Docker CLI multiplies
+		// by the core count to report "percent of one core" instead.
+		usage.CPUPercent = float64(cpuDelta) / float64(systemDelta) * 100
+	}
+	return usage
+}
+
+// UpdateContainerResources changes CPU and memory limits on a live container.
+// Zero removes the corresponding limit, matching ContainerSpec.
+func (c *Client) UpdateContainerResources(ctx context.Context, id string, cpuLimit float64, memoryLimit int64) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	var nanoCPUs int64
+	if cpuLimit > 0 {
+		nanoCPUs = int64(cpuLimit * 1e9)
+	}
+	_, err := c.cli.ContainerUpdate(ctx, id, container.UpdateConfig{
+		Resources: container.Resources{
+			Memory:   memoryLimit,
+			NanoCPUs: nanoCPUs,
+		},
+	})
+	if err != nil {
+		if isNotFound(err) {
+			return ErrNoSuchContainer
+		}
+		return fmt.Errorf("update container resources: %w", err)
 	}
 	return nil
 }

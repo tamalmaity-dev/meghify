@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { XTerminal } from "@/components/terminal";
 import { SystemMetrics } from "@/components/system-metrics";
 import { DockerCleanupPanel } from "@/components/docker-cleanup";
+import { ResourceGuardPanel } from "@/components/resource-guard";
 import { cn } from "@/lib/utils";
 import type { Node } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
@@ -23,6 +24,7 @@ const SECTIONS = [
   { key: "terminal", label: "Terminal" },
   { key: "metrics", label: "Metrics" },
   { key: "docker", label: "Docker cleanup" },
+  { key: "guard", label: "Resource protection" },
   { key: "danger", label: "Danger zone" },
 ] as const;
 
@@ -67,11 +69,15 @@ export function NodeDetailPage() {
     });
   }, [node.data]);
 
-  // Docker cleanup is scoped to the panel's local engine. If the user was on
-  // that tab and then opens a remote server, fall back to General instead of
-  // rendering an empty pane.
+  // Docker cleanup and the panel-wide resource guard are configured from the
+  // local server page. Hide those panes on remote servers rather than showing
+  // controls that would silently affect another machine.
   useEffect(() => {
-    if (section === "docker" && node.data && node.data.id !== LOCAL_NODE_ID) {
+    if (
+      (section === "docker" || section === "guard") &&
+      node.data &&
+      node.data.id !== LOCAL_NODE_ID
+    ) {
       setSection("general");
     }
   }, [node.data, section]);
@@ -132,7 +138,10 @@ export function NodeDetailPage() {
   const isLocal = server.id === LOCAL_NODE_ID;
   // Cleanup runs against the panel's own Docker engine, so it is not offered
   // on remote nodes until their engines are managed by the cleanup service.
-  const sections = isLocal ? SECTIONS : SECTIONS.filter((item) => item.key !== "docker");
+  // The resource guard is panel-wide but stays beside it on the local page.
+  const sections = isLocal
+    ? SECTIONS
+    : SECTIONS.filter((item) => item.key !== "docker" && item.key !== "guard");
   const ready = server.status === "online";
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const terminalUrl = `${protocol}://${window.location.host}/api/nodes/${nodeId}/terminal`;
@@ -381,6 +390,8 @@ export function NodeDetailPage() {
           {section === "metrics" && <SystemMetrics nodeId={nodeId} />}
 
           {section === "docker" && isLocal && <DockerCleanupPanel />}
+
+          {section === "guard" && isLocal && <ResourceGuardPanel />}
 
           {section === "danger" && (
             <Card>

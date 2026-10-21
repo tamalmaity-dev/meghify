@@ -22,6 +22,7 @@ type Store struct {
 	Jobs          *JobRepo
 	GitHub        *GitHubRepo
 	DockerCleanup *DockerCleanupRepo
+	ResourceGuard *ResourceGuardRepo
 }
 
 // OpenStore builds a Store from an already opened handle.
@@ -37,6 +38,7 @@ func OpenStore(handle *sql.DB) *Store {
 		Jobs:          &JobRepo{db: handle},
 		GitHub:        &GitHubRepo{db: handle},
 		DockerCleanup: &DockerCleanupRepo{db: handle},
+		ResourceGuard: &ResourceGuardRepo{db: handle},
 	}
 }
 

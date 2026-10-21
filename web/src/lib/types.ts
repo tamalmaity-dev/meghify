@@ -84,6 +84,14 @@ export interface Application {
   cpuLimit: number;
   /** Bytes; zero keeps the engine default. */
   memoryLimit: number;
+  /** Panel-wide protection is inherited unless this is switched off. */
+  resourceGuardEnabled: boolean;
+  /** Empty string inherits the panel policy. */
+  resourceGuardCpuAction: "" | "notify" | "throttle" | "stop";
+  resourceGuardMemoryAction: "" | "notify" | "stop";
+  /** 0 inherits the panel threshold; otherwise a percentage. */
+  resourceGuardCpuPercent: number;
+  resourceGuardMemoryPercent: number;
   preDeployCommand: string;
   postDeployCommand: string;
   /** Set when the repository is deployed through a GitHub App installation. */
@@ -316,6 +324,49 @@ export interface DockerCleanupRun {
   volumesRemoved: number;
   networksRemoved: number;
   error?: string;
+}
+
+export type ResourceGuardAction = "notify" | "throttle" | "stop";
+export type ResourceGuardMetric = "cpu" | "memory" | "host_memory";
+
+/** Panel-wide protection policy; per-app overrides live on Application. */
+export interface ResourceGuardSettings {
+  enabled: boolean;
+  cpuEnabled: boolean;
+  cpuPercent: number;
+  cpuDurationSeconds: number;
+  cpuAction: "notify" | "throttle" | "stop";
+  cpuThrottlePercent: number;
+  memoryEnabled: boolean;
+  memoryPercent: number;
+  memoryDurationSeconds: number;
+  memoryAction: "notify" | "stop";
+  hostMemoryEnabled: boolean;
+  hostMemoryPercent: number;
+  hostMemoryDurationSeconds: number;
+  graceSeconds: number;
+  cooldownSeconds: number;
+  updatedAt: string;
+}
+
+export interface ResourceGuardEvent {
+  id: string;
+  applicationId: string;
+  applicationName: string;
+  nodeId: string;
+  containerId: string;
+  containerName: string;
+  metric: ResourceGuardMetric;
+  action: ResourceGuardAction;
+  status: "success" | "failed";
+  observedPercent: number;
+  thresholdPercent: number;
+  durationSeconds: number;
+  usageBytes?: number;
+  limitBytes?: number;
+  message: string;
+  error?: string;
+  createdAt: string;
 }
 
 export interface APIToken {

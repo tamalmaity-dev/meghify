@@ -26,6 +26,13 @@ import (
 	"github.com/tamalmaity-dev/meghify/internal/version"
 )
 
+// ResourceGuardResetter lets the API clear a cached protection decision when
+// an operator changes limits or per-application policy.
+type ResourceGuardResetter interface {
+	ResetApplication(appID string)
+	ResetAll()
+}
+
 // Server holds every dependency the HTTP layer needs.
 type Server struct {
 	cfg      *config.Config
@@ -37,6 +44,7 @@ type Server struct {
 	pipeline *deploy.Pipeline
 	docker   *docker.Client
 	nodes    *node.Registry
+	guard    ResourceGuardResetter
 	spa      *SPAHandler
 	logger   *slog.Logger
 	started  time.Time
@@ -62,6 +70,7 @@ type Options struct {
 	Pipeline *deploy.Pipeline
 	Docker   *docker.Client
 	Nodes    *node.Registry
+	Guard    ResourceGuardResetter
 	SPA      *SPAHandler
 	Logger   *slog.Logger
 }
@@ -81,6 +90,7 @@ func NewServer(opts Options) *Server {
 		pipeline: opts.Pipeline,
 		docker:   opts.Docker,
 		nodes:    opts.Nodes,
+		guard:    opts.Guard,
 		spa:      opts.SPA,
 		logger:   opts.Logger,
 		started:  time.Now(),
@@ -209,6 +219,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/", s.createApplication)
 				r.Put("/{id}", s.updateApplication)
 				r.Patch("/{id}", s.updateApplication)
+				r.Post("/{id}/apply-limits", s.applyApplicationLimitsNow)
 				r.Delete("/{id}", s.deleteApplication)
 				r.Get("/{id}/terminal", s.terminalSession)
 				r.Delete("/{id}/deployments", s.clearDeployments)
@@ -259,6 +270,16 @@ func (s *Server) Router() http.Handler {
 			r.Put("/cleanup", s.updateDockerCleanupSettings)
 			r.Post("/cleanup", s.dockerCleanup)
 			r.Get("/cleanup/history", s.dockerCleanupHistory)
+		})
+
+		// Panel-wide protection against runaway application containers. The
+		// scheduler samples every managed engine; these endpoints edit the
+		// policy and read the durable action history.
+		r.Route("/resource-guard", func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
+			r.Get("/settings", s.resourceGuardSettings)
+			r.Put("/settings", s.updateResourceGuardSettings)
+			r.Get("/events", s.resourceGuardEvents)
 		})
 
 		r.Route("/deployments", func(r chi.Router) {

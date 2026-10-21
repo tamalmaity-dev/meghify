@@ -7,6 +7,7 @@ import { api, streamEvents } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { XTerminal } from "@/components/terminal";
+import { ApplicationResourceGuardCard } from "@/components/resource-guard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import type {
   Domain,
   EnvVar,
   Node as ServerNode,
+  ResourceGuardEvent,
   Volume,
 } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
@@ -107,6 +109,44 @@ export function ApplicationDetailPage() {
     queryKey: ["volumes", applicationId],
     queryFn: () => api.get<Volume[]>(`/applications/${applicationId}/volumes`),
   });
+  const guardEvents = useQuery({
+    queryKey: ["resource-guard", "events", applicationId, "latest"],
+    queryFn: () => api.get<ResourceGuardEvent[]>(
+      `/resource-guard/events?applicationId=${encodeURIComponent(applicationId)}&limit=1`,
+    ),
+    enabled: isAdmin,
+    refetchInterval: 20_000,
+  });
+
+  // The guard writes an application event when it notifies, throttles or
+  // stops a container. Keep the page in sync even when it was already open.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        for await (const event of streamEvents(
+          `/api/stream?channel=application:${applicationId}&replay=0`,
+          controller.signal,
+        )) {
+          if (event.event !== "resource_guard") continue;
+          const action = String(event.action ?? "notify");
+          const message = String(event.message ?? "Resource protection acted on this application");
+          toast.warning(`Resource guard: ${message}`);
+          if (action === "stop") {
+            queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
+          }
+          queryClient.invalidateQueries({
+            queryKey: ["resource-guard", "events", applicationId, "latest"],
+          });
+        }
+      } catch {
+        // Abort on unmount is expected; the stream helper reconnects on
+        // transient network failures by itself.
+      }
+    })();
+    return () => controller.abort();
+  }, [applicationId, isAdmin, queryClient]);
 
   const deploy = useMutation({
     mutationFn: (options: { noCache: boolean }) =>
@@ -138,6 +178,13 @@ export function ApplicationDetailPage() {
   // the domain's TLS setting rather than assuming HTTPS.
   const primaryDomain = domains.data?.find((domain) => domain.host === application?.fqdn);
   const fqdnScheme = primaryDomain && !primaryDomain.tlsEnabled ? "http" : "https";
+  const guardStop = guardEvents.data?.[0];
+  const guardStopRecent = Boolean(
+    guardStop &&
+      guardStop.action === "stop" &&
+      application?.status === "stopped" &&
+      Date.now() - new Date(guardStop.createdAt).getTime() < 24 * 60 * 60 * 1000,
+  );
 
   const openLogs = (deploymentID: string) => {
     setPickedDeployment(deploymentID);
@@ -199,6 +246,17 @@ export function ApplicationDetailPage() {
         )}
         {active && <span className="text-[11px] text-warn">{active.status}…</span>}
       </div>
+
+      {guardStopRecent && guardStop && (
+        <div className="mb-4 flex items-start gap-2 rounded-md bg-warn/10 px-3 py-2 text-[11.5px] leading-relaxed text-warn">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <strong className="font-medium">Stopped by Resource Guard.</strong> {guardStop.message}{" "}
+            Start the application again only after fixing the resource usage, or turn protection
+            off from Runtime.
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
         <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
@@ -288,7 +346,10 @@ export function ApplicationDetailPage() {
           )}
 
           {section === "runtime" && application && (
-            <RuntimeCard app={application} applicationId={applicationId} />
+            <div className="space-y-3">
+              <RuntimeCard app={application} applicationId={applicationId} />
+              <ApplicationResourceGuardCard app={application} applicationId={applicationId} />
+            </div>
           )}
 
           {section === "danger" && application && (
@@ -1749,6 +1810,11 @@ function applicationPayload(app: Application, overrides: Record<string, unknown>
     redirectHttps: app.redirectHttps,
     cpuLimit: app.cpuLimit,
     memoryLimit: app.memoryLimit,
+    resourceGuardEnabled: app.resourceGuardEnabled,
+    resourceGuardCpuAction: app.resourceGuardCpuAction,
+    resourceGuardMemoryAction: app.resourceGuardMemoryAction,
+    resourceGuardCpuPercent: app.resourceGuardCpuPercent,
+    resourceGuardMemoryPercent: app.resourceGuardMemoryPercent,
     preDeployCommand: app.preDeployCommand,
     postDeployCommand: app.postDeployCommand,
     ...overrides,
@@ -1901,9 +1967,15 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
         }),
       ),
     onSuccess: async () => {
-      toast.success("Runtime saved — applied on the next deploy");
+      toast.success("Runtime saved — live limits updated where the container is running");
       await queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
     },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const apply = useMutation({
+    mutationFn: () => api.post<Application>(`/applications/${applicationId}/apply-limits`),
+    onSuccess: () => toast.success("Saved CPU and memory limits applied to the running container"),
     onError: (error) => toast.error(error.message),
   });
 
@@ -1926,6 +1998,18 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
               <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
                 Fraction of one core, e.g. 1.5. Empty keeps the engine default.
               </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {["0.5", "1", "2"].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCpu(preset)}
+                    className="rounded-full border border-line/60 px-2 py-0.5 text-[10.5px] text-black/50 transition-colors hover:bg-black/[0.04] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.05]"
+                  >
+                    {preset} core{preset === "1" ? "" : "s"}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <Label htmlFor="rt-memory">Memory limit</Label>
@@ -1938,8 +2022,24 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
               <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
                 Accepts 512m, 2g or a plain byte count. Empty keeps the engine default.
               </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {["256m", "512m", "1g", "2g"].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setMemory(preset)}
+                    className="rounded-full border border-line/60 px-2 py-0.5 text-[10.5px] text-black/50 transition-colors hover:bg-black/[0.04] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.05]"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+
+          <p className="rounded-md bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-black/45 dark:text-white/40">
+            Saved limits are pushed to the running container immediately when the engine is reachable. They also apply to every future deployment.
+          </p>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
@@ -1970,10 +2070,23 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
             </div>
           </div>
 
-          <div className="flex justify-end border-t border-line/40 pt-3">
-            <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
-              Save changes
-            </Button>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/40 pt-3">
+            <p className="text-[10.5px] text-black/40 dark:text-white/35">
+              Applying limits also clears a temporary resource-guard CPU throttle.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="neutral"
+                size="sm"
+                disabled={apply.isPending}
+                onClick={() => apply.mutate()}
+              >
+                {apply.isPending ? "Applying…" : "Apply limits now"}
+              </Button>
+              <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+                Save changes
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

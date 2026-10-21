@@ -224,6 +224,13 @@ type Application struct {
 	// container. Zero keeps the engine default.
 	CPULimit    float64 `json:"cpuLimit"`
 	MemoryLimit int64   `json:"memoryLimit"`
+	// Resource guard overrides. The panel-wide defaults apply when an action
+	// or percentage is empty/zero; Enabled=false opts this application out.
+	ResourceGuardEnabled       bool   `json:"resourceGuardEnabled"`
+	ResourceGuardCPUAction     string `json:"resourceGuardCpuAction"`
+	ResourceGuardMemoryAction  string `json:"resourceGuardMemoryAction"`
+	ResourceGuardCPUPercent    int    `json:"resourceGuardCpuPercent"`
+	ResourceGuardMemoryPercent int    `json:"resourceGuardMemoryPercent"`
 	// PreDeployCommand runs inside the previous container before the new one
 	// replaces it; PostDeployCommand runs inside the new container after it is
 	// live. Empty disables each hook.

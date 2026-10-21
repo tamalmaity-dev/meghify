@@ -14,6 +14,14 @@ import (
 // access. Handlers map it to 503 instead of leaking an internal nil pointer.
 var errNoEngine = errors.New("docker engine is not configured")
 
+// errNoContainer is returned when a running application has no final managed
+// container (stopped, mid-deploy, or removed outside the panel).
+var errNoContainer = errors.New("application container is not running")
+
+// errEngineUnavailable wraps an engine lookup or connection failure so the API
+// can answer with 503 instead of treating it as an internal panel error.
+var errEngineUnavailable = errors.New("docker engine unavailable")
+
 // validateNodeSelection accepts the panel's own node and any registered remote
 // node. Storing an arbitrary string used to produce applications that could
 // never deploy and obscured the difference between local and remote.

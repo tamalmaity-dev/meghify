@@ -29,6 +29,7 @@ import (
 	"github.com/tamalmaity-dev/meghify/internal/jobs"
 	"github.com/tamalmaity-dev/meghify/internal/node"
 	"github.com/tamalmaity-dev/meghify/internal/realtime"
+	"github.com/tamalmaity-dev/meghify/internal/resourceguard"
 	"github.com/tamalmaity-dev/meghify/internal/version"
 	"github.com/tamalmaity-dev/meghify/internal/webui"
 )
@@ -133,6 +134,15 @@ func run() error {
 		return nodeRegistry.ClientFor(ctx, n)
 	}
 
+	resourceGuard := resourceguard.New(resourceguard.Options{
+		Store: store,
+		Resolve: func(ctx context.Context, nodeID string) (resourceguard.Engine, error) {
+			return resolveClient(ctx, nodeID)
+		},
+		Hub:    hub,
+		Logger: logger,
+	})
+
 	pipeline := deploy.NewPipeline(deploy.Options{
 		Store:     store,
 		Secrets:   box,
@@ -171,6 +181,13 @@ func run() error {
 	})
 	registerJobs(runner, pipeline, store, hub, localClient, nodeRegistry, resolveClient, cfg, logger)
 
+	// Resource protection runs on the cron sidecar rather than the durable job
+	// queue: samples are cheap, frequent upkeep, not work an operator needs in
+	// the job history. The guard coalesces overlapping passes internally.
+	runner.RegisterCronFunc("@every 30s", func(ctx context.Context) {
+		resourceGuard.RunScheduled()
+	})
+
 	// The compiled frontend is embedded so the panel ships as a single binary.
 	// `go build -tags web_assets ./cmd/meghify` after running the web build
 	// produces the all-in-one executable; without the tag the API runs standalone.
@@ -196,6 +213,7 @@ func run() error {
 		Pipeline: pipeline,
 		Docker:   localClient,
 		Nodes:    nodeRegistry,
+		Guard:    resourceGuard,
 		SPA:      spa,
 		Logger:   logger,
 	})
