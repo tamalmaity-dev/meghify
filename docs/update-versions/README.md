@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.9.2](0.9.2.md) | 2026-10-22 | In-panel Help page for container ports, host mappings, domain routing and Bad Gateway troubleshooting |
 | [0.9.1](0.9.1.md) | 2026-10-22 | Refresh application status after deployment, inherit/clear domain ports safely, pass the container port as `PORT`, clarify isolated app ports |
 | [0.9.0](0.9.0.md) | 2026-10-22 | Resource Guard for sustained CPU/memory pressure, host-memory emergency stop, per-application overrides, live CPU/memory limit updates |
 | [0.8.0](0.8.0.md) | 2026-10-22 | Terminal page for servers and running containers, idle keepalive/reconnect, terminal themes and font controls, configurable Docker cleanup schedule with history |

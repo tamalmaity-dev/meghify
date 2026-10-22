@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, Outlet } from "@tanstack/react-router";
 import {
   Boxes,
+  CircleHelp,
   Database,
   FolderKanban,
   Github,
@@ -55,6 +56,7 @@ const NAV = [
   { to: "/terminal", label: "Terminal", icon: TerminalSquare, adminOnly: true },
   { to: "/jobs", label: "Job queue", icon: Boxes, adminOnly: true },
   { to: "/team", label: "Team", icon: Users, adminOnly: true },
+  { to: "/help", label: "Help", icon: CircleHelp, adminOnly: false },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: false },
 ] as const;
 

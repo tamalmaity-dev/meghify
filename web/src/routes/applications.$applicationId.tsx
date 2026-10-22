@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -1891,6 +1891,12 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
       <Card>
         <CardHeader>
           <CardTitle>Networking</CardTitle>
+          <Link
+            to="/help"
+            className="text-[11px] font-medium text-brand hover:underline"
+          >
+            Port binding help
+          </Link>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">

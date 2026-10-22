@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DatabasesRouteImport } from './routes/databases'
+import { Route as HelpRouteImport } from './routes/help'
 import { Route as JobsRouteImport } from './routes/jobs'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NodesRouteImport } from './routes/nodes'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
 const DatabasesRoute = DatabasesRouteImport.update({
   id: '/databases',
   path: '/databases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JobsRoute = JobsRouteImport.update({
@@ -117,6 +123,7 @@ const SourcesAppIdRoute = SourcesAppIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/databases': typeof DatabasesRoute
+  '/help': typeof HelpRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
@@ -136,6 +143,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/databases': typeof DatabasesRoute
+  '/help': typeof HelpRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/databases': typeof DatabasesRoute
+  '/help': typeof HelpRoute
   '/jobs': typeof JobsRoute
   '/login': typeof LoginRoute
   '/nodes': typeof NodesRouteWithChildren
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/databases'
+    | '/help'
     | '/jobs'
     | '/login'
     | '/nodes'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/databases'
+    | '/help'
     | '/jobs'
     | '/login'
     | '/settings'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/databases'
+    | '/help'
     | '/jobs'
     | '/login'
     | '/nodes'
@@ -229,6 +241,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DatabasesRoute: typeof DatabasesRoute
+  HelpRoute: typeof HelpRoute
   JobsRoute: typeof JobsRoute
   LoginRoute: typeof LoginRoute
   NodesRoute: typeof NodesRouteWithChildren
@@ -254,6 +267,13 @@ declare module '@tanstack/react-router' {
       path: '/databases'
       fullPath: '/databases'
       preLoaderRoute: typeof DatabasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/jobs': {
@@ -406,6 +426,7 @@ const SourcesRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DatabasesRoute: DatabasesRoute,
+  HelpRoute: HelpRoute,
   JobsRoute: JobsRoute,
   LoginRoute: LoginRoute,
   NodesRoute: NodesRouteWithChildren,
