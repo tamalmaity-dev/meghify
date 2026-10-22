@@ -169,6 +169,16 @@ export function ApplicationDetailPage() {
   );
   const latest = deployments.data?.[0];
   const application = app.data;
+
+  // Only the deployment list is polled while a build runs. Its terminal
+  // transition also updates the application row (status and image tag), so
+  // refresh that separately. Without this the header keeps showing the idle
+  // status and empty image it cached when the deployment was queued.
+  useEffect(() => {
+    if (!latest || isDeploymentInFlight(latest.status)) return;
+    void queryClient.invalidateQueries({ queryKey: ["applications", applicationId] });
+  }, [latest?.id, latest?.status, applicationId, queryClient]);
+
   const watched =
     (pickedDeployment && deployments.data?.find((d) => d.id === pickedDeployment)) || latest;
   const serverName = application?.nodeId
@@ -764,7 +774,7 @@ function DomainsCard({
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ protocol: "https", host: "", port: String(app.port), path: "" });
+    setForm({ protocol: "https", host: "", port: "", path: "" });
     setDialogOpen(true);
   };
   const openEdit = (domain: Domain) => {
@@ -772,7 +782,7 @@ function DomainsCard({
     setForm({
       protocol: domain.tlsEnabled ? "https" : "http",
       host: domain.host,
-      port: domain.port ? String(domain.port) : String(app.port),
+      port: domain.port ? String(domain.port) : "",
       path: domain.path ?? "",
     });
     setDialogOpen(true);
@@ -1084,6 +1094,9 @@ function DomainsCard({
                 onChange={(event) => setForm({ ...form, port: event.target.value })}
                 placeholder={String(app.port)}
               />
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Leave blank to follow the application's container port.
+              </p>
             </div>
           </div>
           <div>
@@ -1891,6 +1904,8 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
               />
               <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
                 The port the application listens on inside the container; the proxy routes to it.
+                Meghify passes this as <code>PORT</code> unless the app already defines it.
+                Containers have isolated networks, so different apps can both use 3000.
               </p>
             </div>
             <div>
