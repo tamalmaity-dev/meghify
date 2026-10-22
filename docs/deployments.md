@@ -226,7 +226,9 @@ Each domain carries its own routing options, edited from the Domains card:
 | **Internal port** | overrides the application port for this domain |
 | **Path** | a path prefix (e.g. `/api/v3`) the domain routes |
 | **Protocol redirect** | for TLS domains: send `http://` to `https://` (the app-level **Redirect HTTP to HTTPS** switch sets the default and applies to existing domains) |
-| **Search indexing** | off adds an `X-Robots-Tag: none` middleware |
+| **WWW redirect** | no redirect, redirect the apex to `www`, or redirect `www` to the apex. The router matches both names and permanently redirects the alternate; both names need DNS records |
+| **Search indexing** | indexable, or no index to add an `X-Robots-Tag: none` middleware |
+| **TLS certificate** | the shield action inspects the live certificate on port 443 and shows issuer, validity, DNS names and whether the chain is trusted |
 | **DNS status** | **Check All DNS** (or the row's check) resolves the host and compares it with the server's public address: *DNS matches*, *DNS mismatch* or *Not checked* |
 
 Leaving **Internal port** empty follows the application's **Container port**.
@@ -270,11 +272,18 @@ it is off, the generated router carries an `X-Robots-Tag: none` middleware;
 compliant crawlers see that header. It is a request to crawlers, not a firewall,
 so it does not stop scrapers that ignore it.
 
-`ACME_EMAIL` is part of the proxy container's command. Changing it recreates
-the proxy on the next panel restart or route reconcile, while the
-`traefik-letsencrypt` volume keeps the certificates. A TLS domain can only get
-a trusted certificate when this value is set, DNS matches and ports 80/443 are
-reachable; without it Traefik serves its fallback certificate.
+`ACME_EMAIL` is part of the proxy container's command. When it is empty, the
+panel falls back to the first admin account's signup email, so a fresh install
+does not need a second environment edit before trusted HTTPS works. An explicit
+`ACME_EMAIL` always wins. Changing the effective address recreates the proxy on
+the next panel restart or route reconcile, while the `traefik-letsencrypt`
+volume keeps the certificates. A TLS domain can only get a trusted certificate
+when the effective address is set, DNS matches and ports 80/443 are reachable;
+without it Traefik serves its fallback certificate.
+
+The **Regenerate hostname** action in the domain dialog creates a fresh random
+`sslip.io` name for applications that use the automatic address. Saving the new
+host updates the application's primary link and the route immediately.
 
 Routers and middlewares live in the proxy's `meghify-proxy-cfg` volume, so the
 files survive proxy recreations and restarts.
@@ -294,7 +303,7 @@ restart.
 |---|---|---|
 | `PROXY_IMAGE` | `traefik:v3.7` | the proxy image; empty disables proxy management. Needs Traefik v3.6+ (older releases cannot talk to Docker Engine 29) |
 | `PROXY_HTTP_PORT` / `PROXY_HTTPS_PORT` | `80` / `443` | host ports the proxy binds — change them when another proxy already owns those ports |
-| `ACME_EMAIL` | empty | registers a Let's Encrypt account; without it, HTTP routing still works and HTTPS serves Traefik's fallback certificate |
+| `ACME_EMAIL` | empty (falls back to the first admin's signup email) | registers a Let's Encrypt account; without an effective address, HTTP routing still works and HTTPS serves Traefik's fallback certificate |
 
 If the proxy cannot start (both ports taken by something else, for example),
 the deployment still succeeds and says so in the log; the application keeps

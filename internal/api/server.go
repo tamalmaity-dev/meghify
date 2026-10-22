@@ -211,6 +211,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/{id}/domains/check", s.checkApplicationDomains)
 			r.Get("/{id}/suggest-domain", s.suggestDomain)
 			r.Post("/domains/{domainID}/check", s.checkDomain)
+			r.Post("/domains/{domainID}/certificate", s.checkDomainCertificate)
 			r.Get("/{id}/env", s.listEnvVars)
 			r.Get("/{id}/volumes", s.listVolumes)
 

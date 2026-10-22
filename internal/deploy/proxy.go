@@ -24,6 +24,7 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 	if p.proxyImage == "" || p.client == nil {
 		return nil
 	}
+	acmeEmail := p.ACMEEmail(ctx)
 	if _, err := p.client.EnsureNetwork(ctx, proxyNetwork, false); err != nil {
 		return err
 	}
@@ -45,7 +46,7 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 		info, inspectErr := p.client.InspectContainer(ctx, container.ID)
 		if inspectErr == nil {
 			staleGeneration := containerLabel(info, "meghify.gen") != proxyGen
-			staleTLS := containerLabel(info, "meghify.acme") != p.proxyEmail
+			staleTLS := containerLabel(info, "meghify.acme") != acmeEmail
 			if staleGeneration || staleTLS {
 				if staleTLS {
 					sink.Write([]byte("[*] recreating the proxy to apply the current TLS settings\n"))
@@ -94,10 +95,10 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 	}
 	mounts := make([]docker.Mount, 0, 3)
 	mounts = append(mounts, docker.Mount{Source: proxyCfgVolume, Target: proxyDynDir})
-	if p.proxyEmail != "" {
+	if acmeEmail != "" {
 		command = append(command,
 			"--certificatesresolvers.letsencrypt.acme.tlschallenge=true",
-			"--certificatesresolvers.letsencrypt.acme.email="+p.proxyEmail,
+			"--certificatesresolvers.letsencrypt.acme.email="+acmeEmail,
 			"--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json")
 		mounts = append(mounts, docker.Mount{Source: "traefik-letsencrypt", Target: "/letsencrypt"})
 	}
@@ -109,7 +110,7 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 		Name:          "proxy",
 		Image:         p.proxyImage,
 		Cmd:           command,
-		Labels:        map[string]string{"meghify.role": "proxy", "meghify.gen": proxyGen, "meghify.acme": p.proxyEmail},
+		Labels:        map[string]string{"meghify.role": "proxy", "meghify.gen": proxyGen, "meghify.acme": acmeEmail},
 		Ports:         map[int]int{80: valueOrDefault(p.proxyPort, 80), 443: valueOrDefault(p.proxyTLSPort, 443)},
 		Volumes:       mounts,
 		Networks:      []string{proxyNetwork},

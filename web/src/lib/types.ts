@@ -17,6 +17,8 @@ export interface Session {
   authenticated: boolean;
   user?: User;
   version?: string;
+  /** Effective Let's Encrypt registration address. */
+  acmeEmail?: string;
   /** True while the instance has no accounts, so the UI can offer sign-up. */
   needsBootstrap?: boolean;
 }
@@ -213,11 +215,28 @@ export interface Domain {
   /** Internal port override; zero uses the application's port. */
   port: number;
   redirectHttps: boolean;
+  /** "", "www" or "non-www": canonical host redirect. */
+  wwwRedirect: string;
   searchIndexing: boolean;
   /** "matches", "mismatch" or "" when never checked. */
   dnsStatus: string;
   dnsCheckedAt?: string;
   createdAt: string;
+}
+
+/** Result of the read-only live TLS inspection endpoint. */
+export interface DomainCertificate {
+  host: string;
+  valid?: boolean;
+  trusted?: boolean;
+  subject?: string;
+  issuer?: string;
+  issuerCommonName?: string;
+  notBefore?: string;
+  notAfter?: string;
+  dnsNames?: string[];
+  error?: string;
+  verifyError?: string;
 }
 
 export interface Volume {

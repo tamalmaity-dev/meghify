@@ -214,13 +214,13 @@ func (r *AppRepo) AssignApplicationNode(ctx context.Context, id, nodeID string) 
 // --- domains ---
 
 const domainColumns = `id, application_id, host, tls_enabled, cert_status, path, port,
-                      redirect_https, search_indexing, dns_status, dns_checked_at, created_at`
+                      redirect_https, www_redirect, search_indexing, dns_status, dns_checked_at, created_at`
 
 func scanDomain(scanner interface{ Scan(...any) error }) (*Domain, error) {
 	var d Domain
 	var dnsCheckedAt, createdAt sql.NullString
 	err := scanner.Scan(&d.ID, &d.ApplicationID, &d.Host, &d.TLSEnabled, &d.CertStatus,
-		&d.Path, &d.Port, &d.RedirectHTTPS, &d.SearchIndexing, &d.DNSStatus,
+		&d.Path, &d.Port, &d.RedirectHTTPS, &d.WWWRedirect, &d.SearchIndexing, &d.DNSStatus,
 		&dnsCheckedAt, &createdAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -237,10 +237,10 @@ func scanDomain(scanner interface{ Scan(...any) error }) (*Domain, error) {
 func (r *AppRepo) CreateDomain(ctx context.Context, d *Domain) error {
 	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO domains (id, application_id, host, tls_enabled, cert_status, path, port,
-		                      redirect_https, search_indexing, dns_status, dns_checked_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                      redirect_https, www_redirect, search_indexing, dns_status, dns_checked_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.ApplicationID, d.Host, d.TLSEnabled, d.CertStatus, d.Path, d.Port,
-		d.RedirectHTTPS, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt),
+		d.RedirectHTTPS, d.WWWRedirect, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt),
 		Text(time.Now().UTC())); err != nil {
 		return fmt.Errorf("insert domain: %w", err)
 	}
@@ -251,10 +251,10 @@ func (r *AppRepo) CreateDomain(ctx context.Context, d *Domain) error {
 func (r *AppRepo) UpdateDomain(ctx context.Context, d *Domain) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE domains SET host = ?, tls_enabled = ?, cert_status = ?, path = ?, port = ?,
-		                    redirect_https = ?, search_indexing = ?, dns_status = ?, dns_checked_at = ?
+		                    redirect_https = ?, www_redirect = ?, search_indexing = ?, dns_status = ?, dns_checked_at = ?
 		  WHERE id = ?`,
 		d.Host, d.TLSEnabled, d.CertStatus, d.Path, d.Port,
-		d.RedirectHTTPS, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt), d.ID)
+		d.RedirectHTTPS, d.WWWRedirect, d.SearchIndexing, d.DNSStatus, TextOptional(d.DNSCheckedAt), d.ID)
 	if err != nil {
 		return err
 	}

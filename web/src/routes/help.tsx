@@ -211,12 +211,21 @@ export function HelpPage() {
                       <td className="px-4 py-3 font-mono text-brand">blank</td>
                     </tr>
                     <tr>
+                      <td className="px-4 py-3 font-medium">Domains → WWW redirect</td>
+                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                        Routes both the apex and <Code>www</Code> name, then permanently
+                        redirects the alternate to the canonical host. Both DNS names must
+                        point here.
+                      </td>
+                      <td className="px-4 py-3 font-mono text-brand">no redirect</td>
+                    </tr>
+                    <tr>
                       <td className="px-4 py-3 font-medium">Domains → Search indexing</td>
                       <td className="px-4 py-3 text-black/50 dark:text-white/40">
-                        Checked allows crawlers. Unchecked adds the real{" "}
+                        Indexable allows crawlers. No index adds the real{" "}
                         <Code>X-Robots-Tag: none</Code> response header.
                       </td>
-                      <td className="px-4 py-3 font-mono text-brand">enabled</td>
+                      <td className="px-4 py-3 font-mono text-brand">indexable</td>
                     </tr>
                     <tr>
                       <td className="px-4 py-3 font-medium">Environment → PORT</td>
@@ -249,17 +258,21 @@ export function HelpPage() {
                 <div className="text-[11.5px] font-medium">Requirements</div>
                 <ul className="mt-1 space-y-1 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
                   <li>
-                    <Code>ACME_EMAIL</Code> set in the panel environment and the panel restarted
+                    <Code>ACME_EMAIL</Code> set in the panel environment, or an admin
+                    account whose signup email is used as the fallback
                   </li>
                   <li>DNS pointing at this server</li>
                   <li>VPS ports 80 and 443 open in the firewall</li>
                 </ul>
               </div>
               <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
-                If the browser still shows <Code>TRAEFIK DEFAULT CERT</Code>, the proxy was
-                created before <Code>ACME_EMAIL</Code> was set. v0.9.3 recreates it on the next
-                panel restart; before that, remove the <Code>meghify-proxy</Code> container and
-                restart the panel.
+                The Domains table shows the effective Let's Encrypt account. Use the
+                shield action on a row to inspect the certificate browsers receive:
+                issuer, validity, DNS names and whether the chain is trusted. If it
+                still shows <Code>TRAEFIK DEFAULT CERT</Code>, the proxy was created
+                before the resolver was configured; v0.9.4 recreates it on the next
+                panel restart. Certificates are cached in the{" "}
+                <Code>traefik-letsencrypt</Code> volume across recreations.
               </p>
             </CardContent>
           </Card>

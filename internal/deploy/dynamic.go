@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -85,6 +86,10 @@ func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver b
 		index := entry.index
 
 		rule := "Host(`" + entry.hostOnly + "`)"
+		canonical, alternate := WWWRedirectHosts(entry.hostOnly, domain.WWWRedirect)
+		if alternate != "" {
+			rule = "(Host(`" + canonical + "`) || Host(`" + alternate + "`))"
+		}
 		if path := domainPath(domain); path != "/" {
 			rule += " && PathPrefix(`" + path + "`)"
 		}
@@ -107,6 +112,18 @@ func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver b
 			middlewares.WriteString("      headers:\n")
 			middlewares.WriteString("        customResponseHeaders:\n")
 			middlewares.WriteString("          X-Robots-Tag: none\n")
+		}
+		if alternate != "" {
+			shared = append(shared, slug+"-www-"+fmt.Sprint(index))
+			scheme := "http"
+			if domain.TLSEnabled {
+				scheme = "https"
+			}
+			middlewares.WriteString("    " + slug + "-www-" + fmt.Sprint(index) + ":\n")
+			middlewares.WriteString("      redirectRegex:\n")
+			middlewares.WriteString("        regex: " + yamlString("^https?://"+regexp.QuoteMeta(alternate)+"(.*)") + "\n")
+			middlewares.WriteString("        replacement: " + yamlString(scheme+"://"+canonical+"$1") + "\n")
+			middlewares.WriteString("        permanent: true\n")
 		}
 
 		if domain.TLSEnabled {
@@ -138,16 +155,15 @@ func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver b
 			routers.WriteString("      rule: " + yamlString(rule) + "\n")
 			routers.WriteString("      service: " + slug + "-" + fmt.Sprint(index) + "\n")
 			routers.WriteString("      middlewares:\n")
+			for _, name := range shared {
+				routers.WriteString("        - " + name + "\n")
+			}
 			if domain.RedirectHTTPS {
 				redirect := slug + "-redirect-to-https-" + fmt.Sprint(index)
 				middlewares.WriteString("    " + redirect + ":\n")
 				middlewares.WriteString("      redirectScheme:\n")
 				middlewares.WriteString("        scheme: https\n")
 				routers.WriteString("        - " + redirect + "\n")
-			} else {
-				for _, name := range shared {
-					routers.WriteString("        - " + name + "\n")
-				}
 			}
 			continue
 		}
@@ -184,6 +200,30 @@ func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver b
 	out.WriteString("  services:\n")
 	out.WriteString(services.String())
 	return out.String()
+}
+
+// WWWRedirectHosts resolves the canonical and alternate hostnames for a
+// domain. The returned alternate is empty when no www redirect is configured.
+func WWWRedirectHosts(host, mode string) (canonical, alternate string) {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "" {
+		return "", ""
+	}
+	isWWW := strings.HasPrefix(host, "www.")
+	switch mode {
+	case "www":
+		if isWWW {
+			return host, strings.TrimPrefix(host, "www.")
+		}
+		return "www." + host, host
+	case "non-www":
+		if isWWW {
+			return strings.TrimPrefix(host, "www."), host
+		}
+		return host, "www." + host
+	default:
+		return host, ""
+	}
 }
 
 // yamlString quotes a YAML scalar. Every generated value that may contain
@@ -330,6 +370,29 @@ func (p *Pipeline) ReconcileRoutes(parent context.Context, logf func(msg string,
 	}
 }
 
+// ACMEEmail resolves the address Traefik uses for Let's Encrypt. An explicit
+// ACME_EMAIL always wins. Otherwise the panel uses the first admin account's
+// signup address, so a fresh install gets trusted HTTPS without asking the
+// operator to edit the environment a second time.
+func (p *Pipeline) ACMEEmail(ctx context.Context) string {
+	if address := strings.TrimSpace(p.proxyEmail); address != "" {
+		return address
+	}
+	if p.store == nil {
+		return ""
+	}
+	users, err := p.store.Users.ListUsers(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, user := range users {
+		if user.Role == db.RoleAdmin && strings.Contains(user.Email, "@") {
+			return strings.TrimSpace(user.Email)
+		}
+	}
+	return ""
+}
+
 // routeUpload writes the file, assuming the proxy exists.
 func (p *Pipeline) routeUpload(ctx context.Context, app *db.Application, domains []*db.Domain) error {
 	if p.client == nil {
@@ -342,13 +405,13 @@ func (p *Pipeline) routeUpload(ctx context.Context, app *db.Application, domains
 	if proxy == nil {
 		return errors.New("the proxy container is missing")
 	}
-	content := p.dynamicContent(app, domains)
+	content := p.dynamicContent(ctx, app, domains)
 	return p.client.CopyToContainer(ctx, proxy.ID, proxyDynDir+"/", tarEntry(routeFileName(app.ID), 0o644, content))
 }
 
-// dynamicContent renders with the pipeline's ACME flag.
-func (p *Pipeline) dynamicContent(app *db.Application, domains []*db.Domain) string {
-	return DynamicConfigYAML(app, domains, p.proxyEmail != "")
+// dynamicContent renders with the pipeline's effective ACME flag.
+func (p *Pipeline) dynamicContent(ctx context.Context, app *db.Application, domains []*db.Domain) string {
+	return DynamicConfigYAML(app, domains, p.ACMEEmail(ctx) != "")
 }
 
 // tarEntry packs a single file for the copy API.

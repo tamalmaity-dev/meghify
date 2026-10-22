@@ -56,3 +56,58 @@ func TestDynamicConfigRoutesToApplicationPortWhenDomainInherits(t *testing.T) {
 		t.Fatalf("route does not honor the domain override:\n%s", yaml)
 	}
 }
+
+func TestWWWRedirectRoutesBothHosts(t *testing.T) {
+	app := &db.Application{ID: "app-2", Name: "www-app", Port: 3000}
+	domain := &db.Domain{
+		ID:            "domain-2",
+		ApplicationID: app.ID,
+		Host:          "example.com",
+		TLSEnabled:    true,
+		RedirectHTTPS: true,
+		WWWRedirect:   "www",
+	}
+
+	yaml := DynamicConfigYAML(app, []*db.Domain{domain}, true)
+	if !strings.Contains(yaml, "(Host(`www.example.com`) || Host(`example.com`))") {
+		t.Fatalf("redirect router does not match both hostnames:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "redirectRegex:") {
+		t.Fatalf("redirect middleware is missing:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "https://www.example.com$1") {
+		t.Fatalf("redirect replacement does not target the canonical host:\n%s", yaml)
+	}
+
+	domain.Host = "www.example.com"
+	domain.WWWRedirect = "non-www"
+	yaml = DynamicConfigYAML(app, []*db.Domain{domain}, true)
+	if !strings.Contains(yaml, "https://example.com$1") {
+		t.Fatalf("non-www redirect does not strip the www prefix:\n%s", yaml)
+	}
+
+	domain.WWWRedirect = ""
+	yaml = DynamicConfigYAML(app, []*db.Domain{domain}, true)
+	if strings.Contains(yaml, "redirectRegex:") {
+		t.Fatalf("no-redirect domain unexpectedly has a redirect middleware:\n%s", yaml)
+	}
+}
+
+func TestWWWRedirectHosts(t *testing.T) {
+	cases := []struct {
+		host, mode, canonical, alternate string
+	}{
+		{"example.com", "www", "www.example.com", "example.com"},
+		{"www.example.com", "www", "www.example.com", "example.com"},
+		{"example.com", "non-www", "example.com", "www.example.com"},
+		{"www.example.com", "non-www", "example.com", "www.example.com"},
+		{"example.com", "", "example.com", ""},
+	}
+	for _, tc := range cases {
+		canonical, alternate := WWWRedirectHosts(tc.host, tc.mode)
+		if canonical != tc.canonical || alternate != tc.alternate {
+			t.Errorf("WWWRedirectHosts(%q, %q) = (%q, %q), want (%q, %q)",
+				tc.host, tc.mode, canonical, alternate, tc.canonical, tc.alternate)
+		}
+	}
+}

@@ -169,8 +169,16 @@ ver_ge() { # ver_ge <version> <minimum> — drop the v prefix before calling
   printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1 | grep -qx "$2"
 }
 
-env_get() { # env_get <file> <KEY> — crude .env lookup, robust to CR endings
+env_get() { # env_get <file> <KEY> - crude .env lookup, robust to CR endings
   sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 | tr -d '\r'
+}
+
+ensure_acme_email_key() { # add the key to older .env files without changing a value
+  local file="$1/.env"
+  [[ -f "$file" ]] || return 0
+  if ! grep -q '^ACME_EMAIL=' "$file" 2>/dev/null; then
+    printf '\n# Let'\''s Encrypt registration address. Empty uses the first admin'\''s signup\n# email, so HTTPS works without editing this file.\nACME_EMAIL=\n' >> "$file"
+  fi
 }
 
 arch_name() { # release asset suffix for this machine
@@ -475,6 +483,7 @@ do_update() {
     envport="$(env_get "$PANEL_DIR/.env" APP_PORT)"
     if [[ "$envport" =~ ^[0-9]+$ ]]; then APP_PORT="$envport"; fi
   fi
+  ensure_acme_email_key "$PANEL_DIR"
   local latest latest_nv current
   latest="$(gh_real_latest)"
   if [[ -z "$latest" ]]; then
@@ -863,6 +872,9 @@ AUTH_SECRET=${AUTH_SECRET}
 APP_ENV=production
 APP_PORT=${APP_PORT}
 PANEL_PUBLIC_URL=http://$(url_host "${HOST_IP:-localhost}"):${APP_PORT}
+# Let's Encrypt registration address. Empty uses the first admin's signup
+# email, so HTTPS works without editing this file.
+ACME_EMAIL=
 EOF
   # Docker mode maps APP_PORT to the fixed in-container listen port; systemd
   # mode runs the binary on the host and binds APP_PORT directly.
@@ -873,8 +885,12 @@ EOF
     printf 'PANEL_ADDR=:%s\nDATA_DIR=%s/data\n' "$APP_PORT" "$PANEL_DIR" >> "$PANEL_DIR/.env"
   fi
 else
-  say ".env already exists — keeping your configuration"
+  say ".env already exists - keeping your configuration"
 fi
+
+# Older installs predate ACME_EMAIL. Add the key without overwriting an address
+# an operator already configured; an empty value falls back to the first admin.
+ensure_acme_email_key "$PANEL_DIR"
 
 # Compose joins the host docker socket group so the distroless nonroot user can
 # reach the engine. Add or repair it on installs created before this setting.

@@ -21,6 +21,7 @@ export function useSession() {
     authenticated: query.data?.authenticated === true,
     needsBootstrap: query.data?.needsBootstrap === true,
     version: query.data?.version,
+    acmeEmail: query.data?.acmeEmail,
     isLoading: query.isLoading,
   };
 }

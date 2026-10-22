@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, ShieldCheck, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, streamEvents } from "@/lib/api";
+import { api, formatDate, streamEvents } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { XTerminal } from "@/components/terminal";
@@ -19,6 +19,7 @@ import type {
   Application,
   Deployment,
   Domain,
+  DomainCertificate,
   EnvVar,
   Node as ServerNode,
   ResourceGuardEvent,
@@ -760,10 +761,21 @@ function DomainsCard({
   domains: Domain[];
 }) {
   const queryClient = useQueryClient();
+  const { acmeEmail } = useSession();
   const [query, setQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Domain | null>(null);
-  const [form, setForm] = useState({ protocol: "https", host: "", port: "", path: "" });
+  const [form, setForm] = useState({
+    protocol: "https",
+    host: "",
+    port: "",
+    path: "",
+    redirectHttps: true,
+    wwwRedirect: "",
+    searchIndexing: true,
+  });
+  const [certificate, setCertificate] = useState<DomainCertificate | null>(null);
+  const [certificateOpen, setCertificateOpen] = useState(false);
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["domains", applicationId] });
@@ -772,7 +784,15 @@ function DomainsCard({
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ protocol: "https", host: "", port: "", path: "" });
+    setForm({
+      protocol: "https",
+      host: "",
+      port: "",
+      path: "",
+      redirectHttps: true,
+      wwwRedirect: "",
+      searchIndexing: true,
+    });
     setDialogOpen(true);
   };
   const openEdit = (domain: Domain) => {
@@ -782,6 +802,9 @@ function DomainsCard({
       host: domain.host,
       port: domain.port ? String(domain.port) : "",
       path: domain.path ?? "",
+      redirectHttps: domain.redirectHttps,
+      wwwRedirect: domain.wwwRedirect ?? "",
+      searchIndexing: domain.searchIndexing,
     });
     setDialogOpen(true);
   };
@@ -793,6 +816,9 @@ function DomainsCard({
         tlsEnabled: form.protocol === "https",
         port: Number(form.port) || 0,
         path: form.path.trim(),
+        redirectHttps: form.redirectHttps,
+        wwwRedirect: form.wwwRedirect,
+        searchIndexing: form.searchIndexing,
       };
       return editing
         ? api.patch(`/applications/domains/${editing.id}`, body)
@@ -809,8 +835,21 @@ function DomainsCard({
   });
 
   const generate = useMutation({
-    mutationFn: () => api.get<{ host: string }>(`/applications/${applicationId}/suggest-domain`),
+    mutationFn: (regenerate: boolean) =>
+      api.get<{ host: string }>(
+        `/applications/${applicationId}/suggest-domain${regenerate ? "?regenerate=1" : ""}`,
+      ),
     onSuccess: (suggestion) => setForm((current) => ({ ...current, host: suggestion.host })),
+    onError: (error) => toast.error(errorText(error)),
+  });
+
+  const checkCertificate = useMutation({
+    mutationFn: (id: string) =>
+      api.post<DomainCertificate>(`/applications/domains/${id}/certificate`),
+    onSuccess: (result) => {
+      setCertificate(result);
+      setCertificateOpen(true);
+    },
     onError: (error) => toast.error(errorText(error)),
   });
 
@@ -831,6 +870,8 @@ function DomainsCard({
         tlsEnabled: domain.tlsEnabled,
         port: domain.port,
         path: domain.path,
+        redirectHttps: domain.redirectHttps,
+        wwwRedirect: domain.wwwRedirect,
         searchIndexing: !domain.searchIndexing,
       }),
     onSuccess: invalidate,
@@ -920,9 +961,13 @@ function DomainsCard({
           <div className="flex items-start gap-2 border-b border-line/40 px-3 py-2 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
             <span>
-              HTTPS certificates are requested automatically once DNS matches. The panel must
-              have <code className="font-mono text-[10px]">ACME_EMAIL</code> configured and ports
-              80/443 open; restart the panel after changing it.
+              HTTPS certificates are requested automatically once DNS matches. Let's Encrypt
+              account:{" "}
+              <span className="font-mono text-[10px] text-black/65 dark:text-white/55">
+                {acmeEmail || "not configured"}
+              </span>
+              . The panel uses <code className="font-mono text-[10px]">ACME_EMAIL</code> when set,
+              otherwise the first admin's signup email. Ports 80/443 must be open.
             </span>
           </div>
 
@@ -940,7 +985,7 @@ function DomainsCard({
                 <>
                   <Th>Domain</Th>
                   <Th>Protocol redirect</Th>
-                  <Th>Domain redirect</Th>
+                  <Th>WWW redirect</Th>
                   <Th>Internal port</Th>
                   <Th>Search indexing</Th>
                   <Th>DNS status</Th>
@@ -975,7 +1020,13 @@ function DomainsCard({
                       <span className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</span>
                     )}
                   </Td>
-                  <Td className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</Td>
+                  <Td className="text-[11.5px] text-black/45 dark:text-white/40">
+                    {domain.wwwRedirect === "www"
+                      ? "→ www"
+                      : domain.wwwRedirect === "non-www"
+                        ? "→ non-www"
+                        : "Disabled"}
+                  </Td>
                   <Td className="font-mono text-[12px]">{domain.port || app.port}</Td>
                   <Td>
                     <input
@@ -1014,6 +1065,15 @@ function DomainsCard({
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Inspect TLS certificate"
+                        onClick={() => checkCertificate.mutate(domain.id)}
+                        disabled={checkCertificate.isPending}
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="ghost" size="icon" title="Edit domain" onClick={() => openEdit(domain)}>
                         <Settings className="h-3.5 w-3.5" />
                       </Button>
@@ -1023,7 +1083,7 @@ function DomainsCard({
                         title="Remove domain"
                         disabled={remove.isPending}
                         onClick={() => {
-                          if (window.confirm(`Remove ${domain.host}? Redeploy to detach it from the proxy.`)) {
+                          if (window.confirm(`Remove ${domain.host}? The route is removed immediately.`)) {
                             remove.mutate(domain.id);
                           }
                         }}
@@ -1043,17 +1103,17 @@ function DomainsCard({
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         title={editing ? "Edit domain" : "Add domain"}
-        description="Traffic for this address routes to the application after the next deploy."
+        description="Traffic starts routing when you save; no redeploy is needed."
         footer={
           <>
-            {!editing && (
+            {(!editing || form.host.endsWith(".sslip.io")) && (
               <Button
                 variant="neutral"
-                onClick={() => generate.mutate()}
+                onClick={() => generate.mutate(Boolean(editing))}
                 disabled={generate.isPending}
                 className="mr-auto"
               >
-                Generate Domain
+                {editing ? "Regenerate hostname" : "Generate hostname"}
               </Button>
             )}
             <Button variant="ghost" onClick={() => setDialogOpen(false)}>
@@ -1117,8 +1177,119 @@ function DomainsCard({
               Optional path prefix routed to this application; leave empty for every path.
             </p>
           </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <Label htmlFor="domain-indexing">Search engine indexing</Label>
+              <Select
+                id="domain-indexing"
+                value={form.searchIndexing ? "enabled" : "disabled"}
+                onChange={(event) =>
+                  setForm({ ...form, searchIndexing: event.target.value === "enabled" })
+                }
+              >
+                <option value="enabled">Indexable</option>
+                <option value="disabled">No index</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="domain-www">WWW redirect</Label>
+              <Select
+                id="domain-www"
+                value={form.wwwRedirect}
+                onChange={(event) => setForm({ ...form, wwwRedirect: event.target.value })}
+              >
+                <option value="">No redirect</option>
+                <option value="www">Redirect to www</option>
+                <option value="non-www">Redirect to non-www</option>
+              </Select>
+              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                Both names must resolve to this server.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="domain-https">HTTP → HTTPS</Label>
+              <Select
+                id="domain-https"
+                value={form.redirectHttps ? "enabled" : "disabled"}
+                onChange={(event) =>
+                  setForm({ ...form, redirectHttps: event.target.value === "enabled" })
+                }
+              >
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </Select>
+            </div>
+          </div>
           {save.isError && <p className="text-[11px] text-danger">{errorText(save.error)}</p>}
         </div>
+      </Modal>
+
+      <Modal
+        open={certificateOpen}
+        onClose={() => setCertificateOpen(false)}
+        title="TLS certificate"
+        description={
+          certificate
+            ? `Live certificate presented by ${certificate.host}:443`
+            : "Live TLS inspection"
+        }
+        footer={
+          <Button variant="primary" onClick={() => setCertificateOpen(false)}>
+            Close
+          </Button>
+        }
+      >
+        {certificate && (
+          <div className="space-y-3 text-[11.5px]">
+            {certificate.error ? (
+              <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-danger">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{certificate.error}</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+                      certificate.trusted && certificate.valid
+                        ? "bg-ok/10 text-ok"
+                        : "bg-warn/10 text-warn",
+                    )}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {certificate.trusted && certificate.valid
+                      ? "Trusted certificate"
+                      : certificate.valid
+                        ? "Untrusted certificate"
+                        : "Invalid certificate"}
+                  </span>
+                  <span className="text-black/40 dark:text-white/30">
+                    {certificate.valid ? "Hostname and dates are valid" : "Check DNS and proxy logs"}
+                  </span>
+                </div>
+                <div className="divide-y divide-line/50 rounded-md border border-line/60 px-3 py-2">
+                  <Row label="Host" value={certificate.host} />
+                  <Row label="Issuer" value={certificate.issuerCommonName || certificate.issuer || "-"} />
+                  <Row label="Subject" value={certificate.subject || "-"} />
+                  <Row label="Valid from" value={formatDate(certificate.notBefore)} />
+                  <Row label="Valid until" value={formatDate(certificate.notAfter)} />
+                  <Row label="DNS names" value={(certificate.dnsNames ?? []).join(", ") || "-"} />
+                </div>
+                {!certificate.trusted && (
+                  <div className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-warn">
+                    <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Browsers will not trust this certificate. The proxy may still be serving its
+                      fallback certificate, or Let&apos;s Encrypt has not finished issuing one yet.
+                      {certificate.verifyError ? ` ${certificate.verifyError}` : ""}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </Modal>
     </>
   );

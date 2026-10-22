@@ -121,7 +121,16 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"user":          user,
 		"version":       version.Version,
+		"acmeEmail":     s.acmeEmail(r.Context()),
 	})
+}
+
+// acmeEmail is the address shown in the panel for Let's Encrypt registration.
+func (s *Server) acmeEmail(ctx context.Context) string {
+	if s.pipeline != nil {
+		return s.pipeline.ACMEEmail(ctx)
+	}
+	return strings.TrimSpace(s.cfg.ACMEEmail)
 }
 
 // setSessionCookie stores the session token.

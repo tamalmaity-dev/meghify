@@ -316,6 +316,9 @@ type Domain struct {
 	Port int `json:"port"`
 	// RedirectHTTPS sends plain-HTTP requests for this host to https.
 	RedirectHTTPS bool `json:"redirectHttps"`
+	// WWWRedirect controls the www/apex canonical host. Empty disables it;
+	// "www" redirects the apex to www, "non-www" redirects www to the apex.
+	WWWRedirect string `json:"wwwRedirect"`
 	// SearchIndexing controls whether crawlers may index the domain.
 	SearchIndexing bool `json:"searchIndexing"`
 	// DNSStatus is the cached outcome of the last DNS check:

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -699,7 +700,11 @@ func (s *Server) applicationLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	yaml := deploy.DynamicConfigYAML(app, domains, s.cfg.ACMEEmail != "")
+	acme := s.cfg.ACMEEmail != ""
+	if s.pipeline != nil {
+		acme = s.pipeline.ACMEEmail(r.Context()) != ""
+	}
+	yaml := deploy.DynamicConfigYAML(app, domains, acme)
 	lines := strings.Split(strings.TrimRight(yaml, "\n"), "\n")
 	writeJSON(w, http.StatusOK, lines)
 }
@@ -714,12 +719,13 @@ func (s *Server) listDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 type domainRequest struct {
-	Host           string `json:"host"`
-	TLSEnabled     *bool  `json:"tlsEnabled"`
-	Path           string `json:"path"`
-	Port           int    `json:"port"`
-	RedirectHTTPS  *bool  `json:"redirectHttps"`
-	SearchIndexing *bool  `json:"searchIndexing"`
+	Host           string  `json:"host"`
+	TLSEnabled     *bool   `json:"tlsEnabled"`
+	Path           string  `json:"path"`
+	Port           int     `json:"port"`
+	RedirectHTTPS  *bool   `json:"redirectHttps"`
+	WWWRedirect    *string `json:"wwwRedirect"`
+	SearchIndexing *bool   `json:"searchIndexing"`
 }
 
 func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
@@ -744,8 +750,12 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	if existing, err := s.store.Applications.DomainByHost(r.Context(), host); err == nil && existing != nil {
-		writeError(w, http.StatusConflict, "that hostname is already in use")
+	wwwRedirect := normalizeWWWRedirect(req.WWWRedirect)
+	if conflict, err := s.conflictingDomainHost(r.Context(), host, wwwRedirect, ""); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if conflict != "" {
+		writeError(w, http.StatusConflict, "that hostname is already in use: "+conflict)
 		return
 	}
 
@@ -758,6 +768,7 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 		Path:           strings.TrimSpace(req.Path),
 		Port:           inheritPort(req.Port, app.Port),
 		RedirectHTTPS:  req.RedirectHTTPS == nil || *req.RedirectHTTPS,
+		WWWRedirect:    wwwRedirect,
 		SearchIndexing: req.SearchIndexing == nil || *req.SearchIndexing,
 	}
 	if err := s.store.Applications.CreateDomain(r.Context(), domain); err != nil {
@@ -782,6 +793,7 @@ func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
+	oldHost := domain.Host
 
 	var req domainRequest
 	if err := decode(r, &req); err != nil {
@@ -793,12 +805,6 @@ func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if host := normalizeHost(req.Host); host != "" {
-		if host != domain.Host {
-			if existing, err := s.store.Applications.DomainByHost(r.Context(), host); err == nil && existing != nil {
-				writeError(w, http.StatusConflict, "that hostname is already in use")
-				return
-			}
-		}
 		domain.Host = host
 	}
 
@@ -815,13 +821,32 @@ func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
 	if req.RedirectHTTPS != nil {
 		domain.RedirectHTTPS = *req.RedirectHTTPS
 	}
+	if req.WWWRedirect != nil {
+		domain.WWWRedirect = normalizeWWWRedirect(req.WWWRedirect)
+	}
 	if req.SearchIndexing != nil {
 		domain.SearchIndexing = *req.SearchIndexing
+	}
+	if conflict, err := s.conflictingDomainHost(r.Context(), domain.Host, domain.WWWRedirect, domain.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if conflict != "" {
+		writeError(w, http.StatusConflict, "that hostname is already in use: "+conflict)
+		return
 	}
 
 	if err := s.store.Applications.UpdateDomain(r.Context(), domain); err != nil {
 		mapError(w, err)
 		return
+	}
+	// Keep the application's primary link in sync when the hostname itself
+	// changes (for example after Regenerate hostname).
+	if domain.Host != oldHost && app.FQDN == oldHost {
+		app.FQDN = domain.Host
+		if err := s.store.Applications.UpdateApplication(r.Context(), app); err != nil {
+			s.logger.Warn("domain host changed but application primary address could not be updated",
+				"application", app.ID, "error", err)
+		}
 	}
 	s.audit(r.Context(), r, "domain.update", "domain", domain.ID, nil)
 	s.syncRoutes(r.Context(), domain.ApplicationID)
@@ -841,7 +866,66 @@ func (s *Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, checked)
 }
 
-// checkApplicationDomains re-checks every domain of an application.
+// checkDomainCertificate inspects the live TLS certificate on the domain's
+// public hostname. It is a read-only diagnostic: the panel does not need the
+// proxy's acme.json to tell the operator what browsers will see.
+func (s *Server) checkDomainCertificate(w http.ResponseWriter, r *http.Request) {
+	domain, err := s.store.Applications.DomainByID(r.Context(), chi.URLParam(r, "domainID"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	host := strings.TrimSuffix(strings.TrimSpace(strings.SplitN(domain.Host, ":", 2)[0]), ".")
+	result := map[string]any{"host": host}
+	if host == "" {
+		result["error"] = "domain has no hostname"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	dialer := &net.Dialer{Timeout: 8 * time.Second}
+	insecure, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, "443"), &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, // inspection only; trust is checked separately
+	})
+	if err != nil {
+		result["error"] = err.Error()
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	state := insecure.ConnectionState()
+	insecure.Close()
+	if len(state.PeerCertificates) == 0 {
+		result["error"] = "the server did not present a certificate"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	cert := state.PeerCertificates[0]
+	now := time.Now()
+	result["subject"] = cert.Subject.String()
+	result["issuer"] = cert.Issuer.String()
+	result["issuerCommonName"] = cert.Issuer.CommonName
+	result["notBefore"] = cert.NotBefore
+	result["notAfter"] = cert.NotAfter
+	result["dnsNames"] = cert.DNSNames
+	valid := now.After(cert.NotBefore) && now.Before(cert.NotAfter) && cert.VerifyHostname(host) == nil
+	result["valid"] = valid
+
+	// A second, verifying handshake distinguishes a real public certificate
+	// from Traefik's fallback. DNS or TCP failures were already reported above.
+	verified, verifyErr := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, "443"), &tls.Config{
+		ServerName: host,
+	})
+	result["trusted"] = verifyErr == nil
+	if verified != nil {
+		verified.Close()
+	}
+	if verifyErr != nil && valid {
+		result["verifyError"] = verifyErr.Error()
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) checkApplicationDomains(w http.ResponseWriter, r *http.Request) {
 	domains, err := s.store.Applications.DomainsByApplication(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
@@ -895,6 +979,9 @@ func (s *Server) suggestDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := s.defaultDomain(r.Context(), app)
+	if r.URL.Query().Get("regenerate") == "1" {
+		host = s.randomDefaultDomain(r.Context(), app)
+	}
 	if host == "" {
 		writeError(w, http.StatusServiceUnavailable, "could not determine this server's public address")
 		return
@@ -942,6 +1029,46 @@ func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSpace(host))
 }
 
+// normalizeWWWRedirect accepts the values the Domains dialog sends and keeps
+// the stored vocabulary small: "", "www" or "non-www".
+func normalizeWWWRedirect(value *string) string {
+	if value == nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(*value)) {
+	case "www", "to-www", "redirect-to-www":
+		return "www"
+	case "non-www", "apex", "to-apex", "redirect-to-apex":
+		return "non-www"
+	default:
+		return ""
+	}
+}
+
+// conflictingDomainHost checks the exact host and, when a www redirect is
+// enabled, both canonical names. The router matches both spellings, so an
+// apex domain owned by another application must block the redirect too.
+func (s *Server) conflictingDomainHost(ctx context.Context, host, wwwRedirect, exceptID string) (string, error) {
+	canonical, alternate := deploy.WWWRedirectHosts(host, wwwRedirect)
+	candidates := []string{host}
+	if alternate != "" {
+		candidates = []string{canonical, alternate}
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		existing, err := s.store.Applications.DomainByHost(ctx, candidate)
+		if err == nil && existing != nil && existing.ID != exceptID {
+			return candidate, nil
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
 // inheritPort stores the application's container port as an inherited value
 // (zero) instead of a fixed per-domain override. A domain that explicitly
 // names a different port keeps that override, including when the application
@@ -969,6 +1096,26 @@ func (s *Server) defaultDomain(ctx context.Context, app *db.Application) string 
 		shortID = shortID[:6]
 	}
 	return fmt.Sprintf("%s-%s.%s.sslip.io", hostSlug(app.Name), shortID, ip)
+}
+
+// randomDefaultDomain is the Regenerate hostname action: a fresh, unguessable
+// sslip.io address instead of the deterministic first-deploy name.
+func (s *Server) randomDefaultDomain(ctx context.Context, app *db.Application) string {
+	ip := s.appIPv4(ctx, app)
+	if ip == "" {
+		return ""
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		token := strings.ReplaceAll(db.NewID(), "-", "")
+		if len(token) > 10 {
+			token = token[:10]
+		}
+		host := fmt.Sprintf("%s-%s.%s.sslip.io", hostSlug(app.Name), strings.ToLower(token), ip)
+		if _, err := s.store.Applications.DomainByHost(ctx, host); err != nil {
+			return host
+		}
+	}
+	return ""
 }
 
 // appIPv4 is the address an application's hostnames should resolve to: the

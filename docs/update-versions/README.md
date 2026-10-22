@@ -5,6 +5,7 @@ update, and anything to watch out for.
 
 | Version | Released | Highlights |
 |---|---|---|
+| [0.9.4](0.9.4.md) | 2026-10-22 | Automatic ACME email from the first admin, WWW redirects, search-indexing and HTTP→HTTPS controls in the domain dialog, Regenerate hostname, live TLS certificate inspector |
 | [0.9.3](0.9.3.md) | 2026-10-22 | Recreate the proxy when `ACME_EMAIL` changes, fix HTTPS 404 with the fallback certificate, add an application domain switcher and HTTPS help |
 | [0.9.2](0.9.2.md) | 2026-10-22 | In-panel Help page for container ports, host mappings, domain routing and Bad Gateway troubleshooting |
 | [0.9.1](0.9.1.md) | 2026-10-22 | Refresh application status after deployment, inherit/clear domain ports safely, pass the container port as `PORT`, clarify isolated app ports |
