@@ -261,6 +261,21 @@ Two consequences worth knowing:
   route, so a missing container answers Traefik's `502 Bad Gateway` rather than
   the bare "404 page not found" the old label-based routing produced.
 
+Adding a domain is therefore hot too: no redeploy is needed for the new host,
+path, port or TLS choice. Redeploy only when the **container port**, image or
+runtime environment changes.
+
+**Search indexing** is a real routing option, not only a table checkbox. When
+it is off, the generated router carries an `X-Robots-Tag: none` middleware;
+compliant crawlers see that header. It is a request to crawlers, not a firewall,
+so it does not stop scrapers that ignore it.
+
+`ACME_EMAIL` is part of the proxy container's command. Changing it recreates
+the proxy on the next panel restart or route reconcile, while the
+`traefik-letsencrypt` volume keeps the certificates. A TLS domain can only get
+a trusted certificate when this value is set, DNS matches and ports 80/443 are
+reachable; without it Traefik serves its fallback certificate.
+
 Routers and middlewares live in the proxy's `meghify-proxy-cfg` volume, so the
 files survive proxy recreations and restarts.
 

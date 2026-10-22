@@ -35,11 +35,20 @@ func TestDynamicConfigRoutesToApplicationPortWhenDomainInherits(t *testing.T) {
 		ID:            "domain-1",
 		ApplicationID: app.ID,
 		Host:          "orchid.example.test",
+		TLSEnabled:    true,
+		RedirectHTTPS: true,
 	}}
 
 	yaml := DynamicConfigYAML(app, domains, false)
 	if !strings.Contains(yaml, "meghify-app-app-1:3001") {
 		t.Fatalf("route does not use the application port:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "tls: {}") {
+		t.Fatalf("TLS router without a resolver is missing an empty TLS config:\n%s", yaml)
+	}
+
+	if yaml := DynamicConfigYAML(app, domains, true); !strings.Contains(yaml, "certResolver: letsencrypt") {
+		t.Fatalf("TLS router does not reference the resolver:\n%s", yaml)
 	}
 
 	domains[0].Port = 8080

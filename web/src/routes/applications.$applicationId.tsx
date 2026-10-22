@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, ShieldCheck, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, streamEvents } from "@/lib/api";
@@ -244,15 +244,13 @@ export function ApplicationDetailPage() {
         <span className="font-mono text-[12px] text-black/55 dark:text-white/45">
           {application?.imageTag || "no image yet"}
         </span>
-        {application?.fqdn && (
-          <a
-            href={`${fqdnScheme}://${application.fqdn}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[12px] text-brand hover:underline"
-          >
-            {fqdnScheme}://{application.fqdn}
-          </a>
+        {application && (
+          <DomainLinks
+            app={application}
+            domains={domains.data ?? []}
+            fallbackScheme={fqdnScheme}
+            onManage={isAdmin ? () => setSection("domains") : undefined}
+          />
         )}
         {active && <span className="text-[11px] text-warn">{active.status}…</span>}
       </div>
@@ -919,6 +917,14 @@ function DomainsCard({
               <option value="disabled">Disabled</option>
             </Select>
           </div>
+          <div className="flex items-start gap-2 border-b border-line/40 px-3 py-2 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
+            <span>
+              HTTPS certificates are requested automatically once DNS matches. The panel must
+              have <code className="font-mono text-[10px]">ACME_EMAIL</code> configured and ports
+              80/443 open; restart the panel after changing it.
+            </span>
+          </div>
 
           {domains.length === 0 ? (
             <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
@@ -1493,6 +1499,121 @@ function highlight(line: string, needle: string): string[] {
     parts.push(line.slice(index, found), line.slice(found, found + needle.length));
     index = found + needle.length;
   }
+}
+
+/**
+ * The application header keeps one primary domain visible. When a second
+ * domain is attached, the primary becomes a dropdown so every domain stays one
+ * click away without adding another card to the page.
+ */
+function DomainLinks({
+  app,
+  domains,
+  fallbackScheme,
+  onManage,
+}: {
+  app: Application;
+  domains: Domain[];
+  fallbackScheme: string;
+  onManage?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocumentClick = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentClick);
+    return () => document.removeEventListener("mousedown", onDocumentClick);
+  }, [open]);
+
+  const seen = new Set<string>();
+  const links = domains
+    .filter((domain) => {
+      if (seen.has(domain.host)) return false;
+      seen.add(domain.host);
+      return true;
+    })
+    .map((domain) => ({
+      host: domain.host,
+      path: domain.path || "",
+      scheme: domain.tlsEnabled ? "https" : "http",
+    }));
+  if (app.fqdn && !seen.has(app.fqdn)) {
+    links.unshift({
+      host: app.fqdn,
+      path: "",
+      scheme: fallbackScheme,
+    });
+  }
+  if (links.length === 0) return null;
+
+  const primary = links.find((link) => link.host === app.fqdn) ?? links[0];
+  const ordered = [primary, ...links.filter((link) => link !== primary)];
+  const label = `${primary.scheme}://${primary.host}${primary.path}`;
+  const external = (link: (typeof links)[number]) => `${link.scheme}://${link.host}${link.path}`;
+
+  if (links.length === 1) {
+    return (
+      <a
+        href={external(primary)}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[12px] text-brand hover:underline"
+      >
+        {label}
+      </a>
+    );
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center gap-1 text-[12px] text-brand hover:underline"
+      >
+        {label}
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-40 mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-line/70 bg-base py-1 shadow-lg">
+          {ordered.map((link) => (
+            <a
+              key={`${link.host}${link.path}`}
+              href={external(link)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 px-3 py-2 font-mono text-[11.5px] text-brand transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+            >
+              <Globe className="h-3.5 w-3.5 shrink-0 text-black/35 dark:text-white/30" />
+              <span className="truncate">{external(link)}</span>
+            </a>
+          ))}
+          {onManage && (
+            <>
+              <div className="my-1 border-t border-line/50" />
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onManage();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Manage domains
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** The header's Actions dropdown, mirroring Coolify's redeploy menu. */

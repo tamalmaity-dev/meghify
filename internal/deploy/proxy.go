@@ -38,11 +38,20 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 	if container != nil {
 		// A proxy from an older generation cannot serve dynamic files: it
 		// carries neither the file provider flag nor the routing volume.
-		// Recreate it in place — letsencrypt data lives in its own volume.
+		// The ACME setting is part of the container command, so it needs a
+		// recreate too when ACME_EMAIL is added or changed after the proxy
+		// was first created. Recreate in place — letsencrypt data lives in
+		// its own volume.
 		info, inspectErr := p.client.InspectContainer(ctx, container.ID)
 		if inspectErr == nil {
-			if gen := containerLabel(info, "meghify.gen"); gen != proxyGen {
-				sink.Write([]byte("[*] upgrading the proxy for dynamic file routing\n"))
+			staleGeneration := containerLabel(info, "meghify.gen") != proxyGen
+			staleTLS := containerLabel(info, "meghify.acme") != p.proxyEmail
+			if staleGeneration || staleTLS {
+				if staleTLS {
+					sink.Write([]byte("[*] recreating the proxy to apply the current TLS settings\n"))
+				} else {
+					sink.Write([]byte("[*] upgrading the proxy for dynamic file routing\n"))
+				}
 				_ = p.client.StopContainer(ctx, container.ID, 10*time.Second)
 				_ = p.client.RemoveContainer(ctx, container.ID)
 				container = nil
@@ -100,7 +109,7 @@ func (p *Pipeline) ensureProxy(ctx context.Context, sink io.Writer) error {
 		Name:          "proxy",
 		Image:         p.proxyImage,
 		Cmd:           command,
-		Labels:        map[string]string{"meghify.role": "proxy", "meghify.gen": proxyGen},
+		Labels:        map[string]string{"meghify.role": "proxy", "meghify.gen": proxyGen, "meghify.acme": p.proxyEmail},
 		Ports:         map[int]int{80: valueOrDefault(p.proxyPort, 80), 443: valueOrDefault(p.proxyTLSPort, 443)},
 		Volumes:       mounts,
 		Networks:      []string{proxyNetwork},

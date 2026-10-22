@@ -119,9 +119,15 @@ func DynamicConfigYAML(app *db.Application, domains []*db.Domain, certResolver b
 			for _, name := range shared {
 				routers.WriteString("        - " + name + "\n")
 			}
-			routers.WriteString("      tls:\n")
 			if certResolver {
+				routers.WriteString("      tls:\n")
 				routers.WriteString("        certResolver: letsencrypt\n")
+			} else {
+				// A bare "tls:" key is a YAML null, not an empty mapping.
+				// Traefik needs a TLS configuration on the router to attach it
+				// to the HTTPS entrypoint; without one it accepts the handshake
+				// with the fallback certificate but answers 404.
+				routers.WriteString("      tls: {}\n")
 			}
 
 			// The matching plain-HTTP router: redirect when configured,
@@ -354,6 +360,10 @@ func tarEntry(name string, mode int64, content string) *bytes.Buffer {
 		Mode:     mode,
 		Size:     int64(len(content)),
 		Typeflag: tar.TypeReg,
+		// Give the extracted file a fresh mtime. Traefik's file provider uses
+		// fsnotify, but a real mtime also keeps volume inspection and tools
+		// that compare timestamps from treating every upload as 1970.
+		ModTime: time.Now(),
 	}
 	_ = writer.WriteHeader(header)
 	_, _ = writer.Write([]byte(content))

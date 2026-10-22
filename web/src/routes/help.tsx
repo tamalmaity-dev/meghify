@@ -7,6 +7,7 @@ import {
   Globe2,
   Network,
   Server,
+  ShieldCheck,
   Terminal,
   TriangleAlert,
 } from "lucide-react";
@@ -210,6 +211,14 @@ export function HelpPage() {
                       <td className="px-4 py-3 font-mono text-brand">blank</td>
                     </tr>
                     <tr>
+                      <td className="px-4 py-3 font-medium">Domains → Search indexing</td>
+                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                        Checked allows crawlers. Unchecked adds the real{" "}
+                        <Code>X-Robots-Tag: none</Code> response header.
+                      </td>
+                      <td className="px-4 py-3 font-mono text-brand">enabled</td>
+                    </tr>
+                    <tr>
                       <td className="px-4 py-3 font-medium">Environment → PORT</td>
                       <td className="px-4 py-3 text-black/50 dark:text-white/40">
                         Meghify passes the container port as <Code>PORT</Code> unless the app
@@ -220,6 +229,38 @@ export function HelpPage() {
                   </tbody>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-brand" />
+                HTTPS & certificates
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+                A domain marked <strong className="font-medium text-current">HTTP → HTTPS</strong>{" "}
+                gets a TLS router immediately. The certificate itself is requested from Let's
+                Encrypt by Traefik and can take a minute after DNS matches.
+              </p>
+              <div className="rounded-md border border-line/50 bg-white/[0.025] p-3">
+                <div className="text-[11.5px] font-medium">Requirements</div>
+                <ul className="mt-1 space-y-1 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+                  <li>
+                    <Code>ACME_EMAIL</Code> set in the panel environment and the panel restarted
+                  </li>
+                  <li>DNS pointing at this server</li>
+                  <li>VPS ports 80 and 443 open in the firewall</li>
+                </ul>
+              </div>
+              <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+                If the browser still shows <Code>TRAEFIK DEFAULT CERT</Code>, the proxy was
+                created before <Code>ACME_EMAIL</Code> was set. v0.9.3 recreates it on the next
+                panel restart; before that, remove the <Code>meghify-proxy</Code> container and
+                restart the panel.
+              </p>
             </CardContent>
           </Card>
 
