@@ -419,6 +419,7 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 		}
 		existing.Dockerfile = dockerfile
 	}
+	previousPort := existing.Port
 	if req.Port != nil {
 		if *req.Port < 0 || *req.Port > 65535 {
 			writeError(w, http.StatusBadRequest, "port must be between 0 and 65535")
@@ -553,6 +554,20 @@ func (s *Server) updateApplication(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Applications.UpdateApplication(r.Context(), existing); err != nil {
 		mapError(w, err)
 		return
+	}
+	// A domain that still carried the old container port as an explicit
+	// override would keep routing to a port the new container no longer uses.
+	// Return those overrides to "follow the application port"; a deliberate
+	// different per-domain port is left alone.
+	if req.Port != nil && existing.Port != previousPort {
+		if domains, err := s.store.Applications.DomainsByApplication(r.Context(), existing.ID); err == nil {
+			for _, domain := range domains {
+				if next := inheritPort(domain.Port, previousPort); next != domain.Port {
+					domain.Port = next
+					s.store.Applications.UpdateDomain(r.Context(), domain)
+				}
+			}
+		}
 	}
 	if limitsChanged || (guardChanged && !existing.ResourceGuardEnabled) {
 		// Turning protection off also lifts a temporary CPU throttle so the
@@ -741,7 +756,7 @@ func (s *Server) createDomain(w http.ResponseWriter, r *http.Request) {
 		TLSEnabled:     req.TLSEnabled == nil || *req.TLSEnabled,
 		CertStatus:     "pending",
 		Path:           strings.TrimSpace(req.Path),
-		Port:           req.Port,
+		Port:           inheritPort(req.Port, app.Port),
 		RedirectHTTPS:  req.RedirectHTTPS == nil || *req.RedirectHTTPS,
 		SearchIndexing: req.SearchIndexing == nil || *req.SearchIndexing,
 	}
@@ -787,8 +802,13 @@ func (s *Server) updateDomain(w http.ResponseWriter, r *http.Request) {
 		domain.Host = host
 	}
 
+	app, err := s.store.Applications.ApplicationByID(r.Context(), domain.ApplicationID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
 	domain.Path = strings.TrimSpace(req.Path)
-	domain.Port = req.Port
+	domain.Port = inheritPort(req.Port, app.Port)
 	if req.TLSEnabled != nil {
 		domain.TLSEnabled = *req.TLSEnabled
 	}
@@ -920,6 +940,17 @@ func (s *Server) attachDomain(r *http.Request, appID, host string) {
 
 func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSpace(host))
+}
+
+// inheritPort stores the application's container port as an inherited value
+// (zero) instead of a fixed per-domain override. A domain that explicitly
+// names a different port keeps that override, including when the application
+// port changes later.
+func inheritPort(port, appPort int) int {
+	if port == appPort {
+		return 0
+	}
+	return port
 }
 
 // --- automatic domains ---

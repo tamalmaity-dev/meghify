@@ -483,6 +483,7 @@ func (p *Pipeline) release(ctx context.Context, sink io.Writer, app *db.Applicat
 	if err != nil {
 		return err
 	}
+	runtimeEnv = withDefaultPort(runtimeEnv, app.Port)
 
 	domains, err := p.store.Applications.DomainsByApplication(ctx, app.ID)
 	if err != nil {
@@ -1026,6 +1027,24 @@ func (p *Pipeline) buildArgs(ctx context.Context, app *db.Application) (map[stri
 	ref := p.imageReference(app)
 	out["PASS_IMAGE_REF"] = &ref
 	return out, nil
+}
+
+// withDefaultPort supplies PORT to the runtime unless the application defines
+// it itself. The container port is the panel's contract with the proxy; many
+// runtimes (Node, Next.js, Rails, .NET and others) listen on PORT, so passing
+// the same value through keeps the process and the route in sync instead of
+// deploying successfully onto a port nothing listens on.
+func withDefaultPort(env []string, port int) []string {
+	if port <= 0 {
+		return env
+	}
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.TrimSpace(name) == "PORT" {
+			return env
+		}
+	}
+	return append(env, "PORT="+strconv.Itoa(port))
 }
 
 // envList returns KEY=VALUE entries for a resource. When buildOnly is true only

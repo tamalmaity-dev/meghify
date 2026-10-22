@@ -229,6 +229,19 @@ Each domain carries its own routing options, edited from the Domains card:
 | **Search indexing** | off adds an `X-Robots-Tag: none` middleware |
 | **DNS status** | **Check All DNS** (or the row's check) resolves the host and compares it with the server's public address: *DNS matches*, *DNS mismatch* or *Not checked* |
 
+Leaving **Internal port** empty follows the application's **Container port**.
+When the application port changes, domain overrides that merely repeated the
+old value are returned to inherited mode; a deliberately different per-domain
+port is kept.
+
+Each application has its own network namespace, so **different applications can
+all listen on the same internal port** (for example 3000). Change **Container
+port** only when the process inside that container really listens elsewhere.
+Meghify passes its value as `PORT` unless the application defines `PORT`
+itself, which keeps common Node, Next.js, Rails and .NET runtimes aligned with
+the proxy. A hard-coded port in the app must still match the value in the
+Networking card.
+
 Routing is a **dynamic configuration file per application**, served through
 Traefik's file provider — the architecture Dokploy uses. The panel drafts the
 file from the Domains card's rows and copies it into the running proxy through

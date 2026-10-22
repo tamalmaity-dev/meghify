@@ -40,6 +40,24 @@ func TestAppIPv4UsesApplicationTargetNode(t *testing.T) {
 	}
 }
 
+func TestDomainPortFollowsApplicationUnlessDeliberatelyOverridden(t *testing.T) {
+	tests := []struct {
+		domainPort int
+		appPort    int
+		want       int
+	}{
+		{domainPort: 3001, appPort: 3001, want: 0},
+		{domainPort: 3000, appPort: 3001, want: 3000},
+		{domainPort: 0, appPort: 3001, want: 0},
+	}
+	for _, test := range tests {
+		if got := inheritPort(test.domainPort, test.appPort); got != test.want {
+			t.Errorf("inheritPort(%d, %d) = %d, want %d",
+				test.domainPort, test.appPort, got, test.want)
+		}
+	}
+}
+
 func TestClientIPIgnoresForwardedHeadersUnlessTrusted(t *testing.T) {
 	request := httptest.NewRequest("GET", "/", nil)
 	request.RemoteAddr = "198.51.100.1:1234"
