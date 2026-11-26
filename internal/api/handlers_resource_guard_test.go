@@ -38,6 +38,22 @@ func TestValidateResourceGuardSettings(t *testing.T) {
 	}
 }
 
+// The defaults must actually catch a runaway single-core process on a 2-core
+// VPS, where one pegged core is only 50% of the host.
+func TestDefaultResourceGuardTunedForSmallVPS(t *testing.T) {
+	d := db.DefaultResourceGuardSettings()
+	if d.CPUPercent > 45 {
+		t.Fatalf("CPU threshold %d%% is too high: one core is ~50%% of a 2-core VPS", d.CPUPercent)
+	}
+	if d.CPUAction == db.GuardActionThrottle && d.CPUThrottlePercent >= d.CPUPercent {
+		t.Fatalf("throttle %d%% must be below the threshold %d%%",
+			d.CPUThrottlePercent, d.CPUPercent)
+	}
+	if d.GraceSeconds > 60 {
+		t.Fatalf("grace %ds delays protection too long after a container start", d.GraceSeconds)
+	}
+}
+
 func TestValidateGuardActions(t *testing.T) {
 	for _, action := range []string{"", db.GuardActionNotify, db.GuardActionThrottle, db.GuardActionStop} {
 		if err := validateGuardCPUAction(action); err != nil {

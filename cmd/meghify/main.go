@@ -183,8 +183,9 @@ func run() error {
 
 	// Resource protection runs on the cron sidecar rather than the durable job
 	// queue: samples are cheap, frequent upkeep, not work an operator needs in
-	// the job history. The guard coalesces overlapping passes internally.
-	runner.RegisterCronFunc("@every 30s", func(ctx context.Context) {
+	// the job history. Ten seconds keeps the reaction time close to the
+	// configured threshold window; the guard coalesces overlapping passes.
+	runner.RegisterCronFunc("@every 10s", func(ctx context.Context) {
 		resourceGuard.RunScheduled()
 	})
 

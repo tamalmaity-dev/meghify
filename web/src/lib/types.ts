@@ -23,6 +23,24 @@ export interface Session {
   needsBootstrap?: boolean;
 }
 
+export interface UpdateStatus {
+  /** Version this panel is running. */
+  current: string;
+  /** Newest published release tag, when GitHub answered. */
+  latest?: string;
+  /** True when `latest` is newer than `current`. */
+  available: boolean;
+  releaseUrl?: string;
+  publishedAt?: string;
+  checkedAt: string;
+  /** Set when the GitHub check failed; the page still renders. */
+  error?: string;
+  /** True when this install can update itself from the panel. */
+  canApply?: boolean;
+  /** Why self-update is unavailable (e.g. a Docker install). */
+  applyBlockedReason?: string;
+}
+
 export interface Project {
   id: string;
   name: string;

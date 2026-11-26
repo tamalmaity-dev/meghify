@@ -138,6 +138,14 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/me/totp", s.totpDisable)
 		r.Get("/stats", s.stats)
 		r.Get("/search", s.search)
+		// Settings shows whether a newer release exists. The check is cached
+		// server-side and never exposes credentials.
+		r.Get("/update/check", s.updateCheck)
+		// Applying an update is a root-level action, so it stays admin-only.
+		r.Group(func(r chi.Router) {
+			r.Use(s.authMW.RequireAdmin)
+			r.Post("/update/apply", s.applyUpdate)
+		})
 
 		// SSE lives behind the session gate: build output can quote source
 		// paths and environment names, so anonymous listeners have no business

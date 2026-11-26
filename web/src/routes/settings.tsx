@@ -3,6 +3,7 @@ import { Copy, KeyRound, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/app-shell";
+import { UpdateCard } from "@/components/update-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -158,6 +159,8 @@ export function SettingsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <UpdateCard currentVersion={version} canUpdate={user?.role === "admin"} />
 
         <Card>
           <CardHeader>

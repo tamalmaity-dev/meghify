@@ -17,7 +17,8 @@ func TestResourceGuardSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("defaults: %v", err)
 	}
 	if !settings.Enabled || settings.CPUAction != db.GuardActionThrottle ||
-		settings.MemoryAction != db.GuardActionStop || settings.CPUPercent != 90 {
+		settings.MemoryAction != db.GuardActionStop || settings.CPUPercent != 40 ||
+		settings.CPUThrottlePercent != 25 || settings.GraceSeconds != 60 {
 		t.Fatalf("unexpected defaults: %+v", settings)
 	}
 

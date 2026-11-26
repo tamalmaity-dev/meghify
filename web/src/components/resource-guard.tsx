@@ -545,8 +545,8 @@ export function ApplicationResourceGuardCard({
     onError: (error) => toast.error(errorText(error)),
   });
 
-  const effectiveCpu = cpuPercent > 0 ? cpuPercent : global.data?.cpuPercent ?? 90;
-  const effectiveMemory = memoryPercent > 0 ? memoryPercent : global.data?.memoryPercent ?? 90;
+  const effectiveCpu = cpuPercent > 0 ? cpuPercent : global.data?.cpuPercent ?? 40;
+  const effectiveMemory = memoryPercent > 0 ? memoryPercent : global.data?.memoryPercent ?? 60;
   const effectiveCpuAction = cpuAction || global.data?.cpuAction || "throttle";
   const effectiveMemoryAction = memoryAction || global.data?.memoryAction || "stop";
   const dirty =
@@ -584,7 +584,7 @@ export function ApplicationResourceGuardCard({
               max={100}
               value={cpuPercent || ""}
               disabled={!enabled}
-              placeholder={`inherit ${global.data?.cpuPercent ?? 90}`}
+              placeholder={`inherit ${global.data?.cpuPercent ?? 40}`}
               onChange={(event) => setCpuPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
             />
             <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
@@ -600,7 +600,7 @@ export function ApplicationResourceGuardCard({
               max={100}
               value={memoryPercent || ""}
               disabled={!enabled}
-              placeholder={`inherit ${global.data?.memoryPercent ?? 90}`}
+              placeholder={`inherit ${global.data?.memoryPercent ?? 60}`}
               onChange={(event) => setMemoryPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
             />
             <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
@@ -640,7 +640,7 @@ export function ApplicationResourceGuardCard({
           <div className="flex items-start gap-2 rounded-md bg-brand/5 px-3 py-2 text-[11px] leading-relaxed text-brand">
             <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Sustained CPU will be capped to {global.data?.cpuThrottlePercent ?? 50}% of host CPU. The saved CPU limit is restored on the next deployment.
+              Sustained CPU will be capped to {global.data?.cpuThrottlePercent ?? 25}% of host CPU. The saved CPU limit is restored on the next deployment.
             </span>
           </div>
         )}

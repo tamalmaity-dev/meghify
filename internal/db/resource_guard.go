@@ -49,23 +49,32 @@ type ResourceGuardSettings struct {
 // DefaultResourceGuardSettings is used until the operator saves a policy.
 // CPU defaults to throttle+notify (the least destructive useful action);
 // memory defaults to stop because a full host is dangerous to every workload.
+//
+// The thresholds are deliberately sized for a small VPS. The original 90% CPU
+// default could never fire on a 2-core box: one pegged core is only ~50% of the
+// host, so a runaway single-core process was never caught. 40% leaves a margin
+// below that ~50% (Docker reports a full core as ~99.97% per-core, which is
+// ~49.98% of the host) and still leaves room on larger machines. Throttling to
+// 25% of the host (half a core on two cores) actually relieves the pressure it
+// detected.
 func DefaultResourceGuardSettings() ResourceGuardSettings {
 	return ResourceGuardSettings{
 		Enabled:                true,
 		CPUEnabled:             true,
-		CPUPercent:             90,
+		CPUPercent:             40,
 		CPUDurationSeconds:     600,
 		CPUAction:              GuardActionThrottle,
-		CPUThrottlePercent:     50,
+		CPUThrottlePercent:     25,
 		MemoryEnabled:          true,
-		MemoryPercent:          90,
+		MemoryPercent:          60,
 		MemoryDurationSeconds:  300,
 		MemoryAction:           GuardActionStop,
 		HostMemoryEnabled:      true,
-		HostMemoryPercent:      95,
+		HostMemoryPercent:      90,
 		HostMemoryDurationSecs: 120,
-		GraceSeconds:           300,
-		CooldownSeconds:        900,
+		// Act soon after a container (re)starts instead of waiting five minutes.
+		GraceSeconds:    60,
+		CooldownSeconds: 900,
 	}
 }
 
@@ -97,9 +106,24 @@ type ResourceGuardRepo struct{ db *sql.DB }
 // Settings returns the singleton policy, creating defaults on first use.
 func (r *ResourceGuardRepo) Settings(ctx context.Context) (*ResourceGuardSettings, error) {
 	now := Text(time.Now().UTC())
+	// Seed the row with the Go defaults, not the table's column defaults: a new
+	// install must get the current policy even though an older migration created
+	// the table with the previous values.
+	d := DefaultResourceGuardSettings()
 	if _, err := r.db.ExecContext(ctx,
-		`INSERT INTO resource_guard_settings (id, updated_at) VALUES ('panel', ?)
-		 ON CONFLICT (id) DO NOTHING`, now); err != nil {
+		`INSERT INTO resource_guard_settings
+		    (id, enabled, cpu_enabled, cpu_percent, cpu_duration_seconds, cpu_action,
+		     cpu_throttle_percent, memory_enabled, memory_percent,
+		     memory_duration_seconds, memory_action, host_memory_enabled,
+		     host_memory_percent, host_memory_duration_seconds, grace_seconds,
+		     cooldown_seconds, updated_at)
+		 VALUES ('panel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (id) DO NOTHING`,
+		d.Enabled, d.CPUEnabled, d.CPUPercent, d.CPUDurationSeconds, d.CPUAction,
+		d.CPUThrottlePercent, d.MemoryEnabled, d.MemoryPercent,
+		d.MemoryDurationSeconds, d.MemoryAction, d.HostMemoryEnabled,
+		d.HostMemoryPercent, d.HostMemoryDurationSecs, d.GraceSeconds,
+		d.CooldownSeconds, now); err != nil {
 		return nil, fmt.Errorf("ensure resource guard settings: %w", err)
 	}
 

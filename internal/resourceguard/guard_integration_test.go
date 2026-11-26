@@ -276,3 +276,57 @@ func TestGuardThrottlesSustainedCPU(t *testing.T) {
 		t.Fatalf("unexpected events: %+v", events)
 	}
 }
+
+// TestGuardDefaultCatchesOneCoreOnTwoCoreVPS is the regression for the field
+// report: a container pegging one core of a 2-core VPS shows ~50% of host CPU
+// (Docker reports ~99.97% per-core), which the old 90% default never caught.
+// The default policy must throttle it to a quarter of the host (half a core).
+func TestGuardDefaultCatchesOneCoreOnTwoCoreVPS(t *testing.T) {
+	store := guardTestStore(t)
+	ctx := context.Background()
+	if err := store.Nodes.UpdateLocalNodeFacts(ctx, "", "", "", "", 2, 8<<30, nil); err != nil {
+		t.Fatalf("node facts: %v", err)
+	}
+	app := guardTestApp(t, store, 0)
+	now := time.Now().UTC()
+	engine := &fakeEngine{
+		containers: []*docker.ContainerInfo{{
+			ID:      "container-1",
+			Name:    docker.ManagedName(deploy.ContainerNameByID(app.ID)),
+			State:   "running",
+			Created: now.Add(-time.Hour).Unix(),
+		}},
+		// One full core of two = 50% of host CPU.
+		usage: &docker.ContainerUsage{CPUPercent: 50},
+	}
+
+	// Keep the shipped CPU threshold/throttle; only shorten the windows so the
+	// test does not wait ten minutes.
+	settings, err := store.ResourceGuard.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.CPUDurationSeconds = 1
+	settings.MemoryEnabled = false
+	settings.HostMemoryEnabled = false
+	settings.GraceSeconds = 0
+	settings.CooldownSeconds = 0
+	if err := store.ResourceGuard.SaveSettings(ctx, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	guard := New(Options{
+		Store: store,
+		Resolve: func(context.Context, string) (Engine, error) {
+			return engine, nil
+		},
+		Now: func() time.Time { return now },
+	})
+	runGuardTwice(t, guard, &now)
+	if !engine.updated {
+		t.Fatalf("default policy did not catch 50%% host CPU with threshold %d%%", settings.CPUPercent)
+	}
+	if engine.cpu != 0.5 {
+		t.Fatalf("throttle CPU = %v, want 0.5 cores (25%% of 2 CPUs)", engine.cpu)
+	}
+}
