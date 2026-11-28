@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { TerminalSquare } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError } from "@/lib/api";
+import { BrandMark, ThemeToggle } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
@@ -28,9 +28,6 @@ export function LoginPage() {
   const [needsCode, setNeedsCode] = useState(false);
   const [error, setError] = useState("");
 
-  // A brand-new instance opens straight into account creation so the first
-  // visitor never stares at a login form that cannot succeed yet. The effect
-  // only fires when the flag arrives, so a manual mode switch is respected.
   useEffect(() => {
     if (needsBootstrap) setMode("bootstrap");
   }, [needsBootstrap]);
@@ -51,23 +48,29 @@ export function LoginPage() {
         setError("Enter the code from your authenticator app.");
         return;
       }
-      // A code was submitted but rejected: keep the field visible.
       if (needsCode) setError(message || "That code was not accepted.");
       else setError(message);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-5 flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand/15 text-brand">
-            <TerminalSquare className="h-4 w-4" />
-          </div>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-app p-4 text-ink">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-40 left-1/2 h-80 w-[42rem] -translate-x-1/2 rounded-full bg-brand/10 blur-3xl"
+      />
+
+      <div className="fixed top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
+
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="mb-5 flex items-center gap-2.5">
+          <BrandMark className="h-8 w-8" />
           <div>
-            <div className="text-[15px] font-semibold tracking-tight">Meghify</div>
-            <div className="text-[11px] text-black/45 dark:text-white/40">
-              {version ? `v${version}` : "self-hosted PaaS"}
+            <div className="text-[16px] font-semibold tracking-tight text-ink">Meghify</div>
+            <div className="text-[11.5px] text-muted">
+              {version ? `v${version}` : "Self-hosted PaaS"}
             </div>
           </div>
         </div>
@@ -75,10 +78,10 @@ export function LoginPage() {
         <Card>
           <CardContent className="space-y-4 p-5">
             <div>
-              <h1 className="text-[18px] font-semibold tracking-tight">
+              <h1 className="text-[18px] font-semibold tracking-tight text-ink">
                 {mode === "bootstrap" ? "Create the first admin" : "Sign in"}
               </h1>
-              <p className="mt-1 text-[12px] text-black/50 dark:text-white/45">
+              <p className="mt-1 text-[12px] leading-relaxed text-muted">
                 {mode === "bootstrap"
                   ? "This instance has no accounts yet. The first user becomes the owner."
                   : "Use an account with access to this panel."}
@@ -134,7 +137,11 @@ export function LoginPage() {
               </div>
             )}
 
-            {error && <p className="text-[11px] text-danger">{error}</p>}
+            {error && (
+              <p className="rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11.5px] text-danger">
+                {error}
+              </p>
+            )}
 
             <Button
               variant="primary"
@@ -145,15 +152,13 @@ export function LoginPage() {
               {mode === "bootstrap" ? "Create admin account" : "Sign in"}
             </Button>
 
-            <div className="text-center">
+            <div className="border-t border-line/50 pt-3 text-center">
               <button
-                className="text-[11px] text-black/45 hover:underline dark:text-white/40"
-                onClick={async () => {
-                  if (mode === "login") {
-                    setMode("bootstrap");
-                    return;
-                  }
-                  setMode("login");
+                type="button"
+                className="text-[11.5px] text-muted transition-colors hover:text-ink hover:underline"
+                onClick={() => {
+                  setError("");
+                  setMode(mode === "login" ? "bootstrap" : "login");
                 }}
               >
                 {mode === "login"
@@ -164,7 +169,7 @@ export function LoginPage() {
           </CardContent>
         </Card>
 
-        <p className="mt-4 text-center text-[10px] text-black/35 dark:text-white/30">
+        <p className="mt-4 text-center text-[11px] leading-relaxed text-faint">
           The panel is in early development. Treat any instance holding your credentials
           as sensitive infrastructure.
         </p>

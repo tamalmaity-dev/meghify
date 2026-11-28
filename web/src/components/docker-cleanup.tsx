@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { api, formatBytes, formatDate } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Switch } from "@/components/ui/input";
 import type {
   DockerCleanupResult,
   DockerCleanupRun,
@@ -127,7 +127,7 @@ export function DockerCleanupPanel() {
   if (!form) {
     return (
       <Card>
-        <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+        <CardContent className="py-8 text-center text-[12px] text-muted">
           Loading cleanup settings…
         </CardContent>
       </Card>
@@ -143,15 +143,13 @@ export function DockerCleanupPanel() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-[16px] font-semibold tracking-tight">Docker cleanup</h2>
-          <p className="mt-0.5 text-[12px] text-black/50 dark:text-white/45">
+          <h2 className="text-[16px] font-semibold tracking-tight text-ink">Docker cleanup</h2>
+          <p className="mt-0.5 text-[12px] text-muted">
             Reclaim images, volumes, networks and build cache on this server.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {dirty && (
-            <span className="text-[10.5px] text-warn">Save settings before running</span>
-          )}
+          {dirty && <span className="text-[11px] font-medium text-warn">Save settings before running</span>}
           <Button
             variant="ghost"
             size="icon"
@@ -189,14 +187,14 @@ export function DockerCleanupPanel() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <HardDrive className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
                 Last reclaim
               </div>
-              <div className="mt-0.5 text-[13px] font-medium">
+              <div className="mt-0.5 text-[13px] font-semibold text-ink">
                 {lastSuccess ? formatBytes(lastSuccess.reclaimedBytes) : "—"}
               </div>
             </div>
@@ -204,14 +202,14 @@ export function DockerCleanupPanel() {
         </Card>
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <Clock3 className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
                 Last run
               </div>
-              <div className="mt-0.5 text-[13px] font-medium">
+              <div className="mt-0.5 text-[13px] font-semibold text-ink">
                 {lastRun ? formatDate(lastRun.startedAt) : "Never"}
               </div>
             </div>
@@ -219,14 +217,14 @@ export function DockerCleanupPanel() {
         </Card>
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <CalendarClock className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
                 Schedule
               </div>
-              <div className="mt-0.5 truncate font-mono text-[12px] font-medium">
+              <div className="mt-0.5 truncate font-mono text-[12px] font-medium text-ink">
                 {form.enabled ? form.schedule : "Disabled"}
               </div>
             </div>
@@ -238,26 +236,15 @@ export function DockerCleanupPanel() {
         <CardHeader>
           <div>
             <CardTitle>Scheduled maintenance</CardTitle>
-            <p className="mt-0.5 text-[11px] text-black/45 dark:text-white/40">
+            <p className="mt-0.5 text-[11px] text-muted">
               Cleanup runs automatically on the schedule below. Manual runs are always available.
             </p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={form.enabled}
+          <Switch
+            checked={form.enabled}
             aria-label="Enable scheduled cleanup"
-            onClick={() => update("enabled", !form.enabled)}
-            className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
-              form.enabled ? "bg-brand" : "bg-white/15"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
-                form.enabled ? "translate-x-3" : ""
-              }`}
-            />
-          </button>
+            onChange={() => update("enabled", !form.enabled)}
+          />
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
           <div>
@@ -277,13 +264,13 @@ export function DockerCleanupPanel() {
                   type="button"
                   disabled={!form.enabled}
                   onClick={() => update("schedule", preset.value)}
-                  className="rounded-full border border-line/60 px-2 py-0.5 text-[10.5px] text-black/50 transition-colors hover:bg-black/[0.04] hover:text-current disabled:opacity-40 dark:text-white/45 dark:hover:bg-white/[0.05]"
+                  className="rounded-full border border-line/70 bg-recessed/70 px-2.5 py-0.5 text-[10.5px] font-medium text-muted transition-colors hover:bg-subtle hover:text-ink disabled:opacity-40"
                 >
                   {preset.label}
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1.5 text-[10.5px] text-faint">
               Five-field cron in the server&apos;s timezone. Default is daily at midnight.
             </p>
           </div>
@@ -323,7 +310,7 @@ export function DockerCleanupPanel() {
       <Card>
         <CardHeader>
           <CardTitle>Advanced cleanup</CardTitle>
-          <span className="text-[10.5px] text-black/40 dark:text-white/35">
+          <span className="text-[10.5px] text-faint">
             Applied to schedules and the Run cleanup button
           </span>
         </CardHeader>
@@ -366,7 +353,7 @@ export function DockerCleanupPanel() {
             </div>
           </div>
           {(form.unusedVolumes || form.unusedNetworks || form.applicationImages === "remove") && (
-            <div className="flex items-start gap-2 rounded-md bg-warn/10 px-3 py-2 text-[11px] leading-relaxed text-warn">
+            <div className="flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[11px] leading-relaxed text-warn">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
                 {form.applicationImages === "remove" &&
@@ -376,8 +363,8 @@ export function DockerCleanupPanel() {
               </span>
             </div>
           )}
-          <div className="flex items-center justify-between border-t border-line/40 pt-3">
-            <p className="text-[10.5px] text-black/40 dark:text-white/35">
+          <div className="flex items-center justify-between border-t border-line/50 pt-3">
+            <p className="text-[10.5px] text-faint">
               Schedule changes take effect within a minute; no panel restart is needed.
             </p>
             <Button
@@ -395,34 +382,28 @@ export function DockerCleanupPanel() {
       <Card>
         <CardHeader>
           <CardTitle>Recent executions</CardTitle>
-          <span className="text-[10.5px] text-black/40 dark:text-white/35">
-            Scheduled and manual runs
-          </span>
+          <span className="text-[10.5px] text-faint">Scheduled and manual runs</span>
         </CardHeader>
         <CardContent className="p-0">
           {history.isLoading ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-              Loading history…
-            </p>
+            <p className="px-4 py-6 text-center text-[12px] text-muted">Loading history…</p>
           ) : !history.data?.length ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            <p className="px-4 py-6 text-center text-[12px] text-muted">
               No cleanup has run yet. Run one now or wait for the schedule.
             </p>
           ) : (
-            <ul className="divide-y divide-line/40">
+            <ul className="divide-y divide-line/45">
               {history.data.map((item) => {
                 const tone = runTone(item.status);
                 return (
                   <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
                     <span className={`text-[11.5px] font-medium ${tone.text}`}>{tone.label}</span>
-                    <span className="text-[11.5px] text-black/55 dark:text-white/45">
-                      {formatDate(item.startedAt)}
-                    </span>
-                    <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:text-white/35">
+                    <span className="text-[11.5px] text-muted">{formatDate(item.startedAt)}</span>
+                    <span className="rounded-full border border-line/60 bg-subtle/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
                       {item.trigger === "schedule" ? "scheduled" : "manual"}
                     </span>
-                    <span className="ml-auto flex items-center gap-3 text-[10.5px] tabular-nums text-black/45 dark:text-white/35">
+                    <span className="ml-auto flex items-center gap-3 text-[10.5px] tabular-nums text-faint">
                       {item.status === "success" && item.reclaimedBytes > 0 && (
                         <span>{formatBytes(item.reclaimedBytes)} reclaimed</span>
                       )}
@@ -447,7 +428,7 @@ export function DockerCleanupPanel() {
                       )}
                     </span>
                     {item.error && (
-                      <p className="w-full pl-3 text-[10.5px] leading-relaxed text-danger/80">
+                      <p className="w-full pl-3 text-[10.5px] leading-relaxed text-danger">
                         {item.error}
                       </p>
                     )}

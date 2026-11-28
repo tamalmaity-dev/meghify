@@ -30,14 +30,14 @@ export function DatabasesPage() {
         {Object.entries(byKind).map(([kind, count]) => (
           <span
             key={kind}
-            className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px]"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line/70 bg-base px-3 py-1 text-[11.5px] font-medium text-ink shadow-xs"
           >
-            <DatabaseIcon className="h-3 w-3 opacity-60" />
+            <DatabaseIcon className="h-3.5 w-3.5 text-brand" />
             {count} {kind}
           </span>
         ))}
         {Object.keys(byKind).length === 0 && (
-          <span className="text-[12px] text-black/45 dark:text-white/40">No databases yet.</span>
+          <span className="text-[12px] text-muted">No databases yet.</span>
         )}
       </div>
 
@@ -59,28 +59,28 @@ export function DatabasesPage() {
           >
             {(databases.data ?? []).map((database) => (
               <Tr key={database.id}>
-                <Td className="font-medium">{database.name}</Td>
-                <Td className="text-black/55 dark:text-white/45">
+                <Td className="font-medium text-ink">{database.name}</Td>
+                <Td className="text-muted">
                   {database.kind}
                   {database.version ? ` ${database.version}` : ""}
                 </Td>
                 <Td>
                   <StatusBadge status={database.status} />
                 </Td>
-                <Td align="right" className="font-mono text-[12px] text-black/55 dark:text-white/45">
+                <Td align="right" className="font-mono text-[12px] text-muted">
                   {database.publicPort || "not published"}
                 </Td>
-                <Td align="right" className="text-black/45 dark:text-white/40">
+                <Td align="right" className="text-faint">
                   {new Date(database.createdAt).toLocaleDateString()}
                 </Td>
               </Tr>
             ))}
             {(databases.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-center text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-[12px] text-muted">
                   Provision a database from any project page.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>
@@ -90,10 +90,10 @@ export function DatabasesPage() {
         <CardHeader>
           <CardTitle>Storage</CardTitle>
         </CardHeader>
-        <CardContent className="text-[12px] text-black/55 dark:text-white/45">
+        <CardContent className="text-[12px] leading-relaxed text-muted">
           Every database keeps its data in a named volume on its node, so a database
           can be redeployed without losing data. Total panel data directory:{" "}
-          <span className="font-mono">{formatBytes(undefined)}</span> once populated.
+          <span className="font-mono text-ink">{formatBytes(undefined)}</span> once populated.
         </CardContent>
       </Card>
     </>

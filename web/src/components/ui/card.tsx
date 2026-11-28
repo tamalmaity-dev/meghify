@@ -2,17 +2,16 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The panel's core surface: a layered card rather than a bordered box. One crisp
- * hairline ring plus a restrained lift separates it from the canvas without the
- * heavy shadows that make dashboards feel cluttered.
+ * The panel's core surface: a crisp elevated card separated from the app canvas
+ * by a hairline border and subtle theme-aware shadow.
  */
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(
-        "rounded-[8px] card-lift bg-base",
-        "border border-line/60",
+        "rounded-xl card-lift bg-base text-ink",
+        "border border-line/75",
         className,
       )}
       {...props}
@@ -28,8 +27,8 @@ export const CardHeader = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "flex items-center justify-between gap-4 rounded-t-[8px] px-4 py-2.5",
-      "bg-white/[0.03] dark:bg-white/[0.03]",
+      "flex items-center justify-between gap-4 rounded-t-xl px-4 py-3",
+      "border-b border-line/50 bg-recessed/45",
       className,
     )}
     {...props}
@@ -43,7 +42,7 @@ export const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h3
     ref={ref}
-    className={cn("text-[13px] font-semibold tracking-tight", className)}
+    className={cn("text-[13px] font-semibold tracking-tight text-ink", className)}
     {...props}
   />
 ));
@@ -55,7 +54,7 @@ export const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn("text-[11px] text-black/50 dark:text-white/45", className)}
+    className={cn("text-[11.5px] text-muted", className)}
     {...props}
   />
 ));
@@ -73,6 +72,10 @@ export const CardFooter = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("flex items-center gap-2 px-4 py-3", className)} {...props} />
+  <div
+    ref={ref}
+    className={cn("flex items-center gap-2 border-t border-line/50 px-4 py-3", className)}
+    {...props}
+  />
 ));
 CardFooter.displayName = "CardFooter";

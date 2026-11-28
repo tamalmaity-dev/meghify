@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 /** Inline code that stays readable against the card surface. */
 function Code({ children }: { children: ReactNode }) {
   return (
-    <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono text-[11px] text-black/80 dark:text-white/75">
+    <code className="rounded border border-line/60 bg-recessed px-1.5 py-0.5 font-mono text-[11px] text-ink">
       {children}
     </code>
   );
@@ -36,25 +36,18 @@ function PortFlowRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="min-w-[8.5rem] rounded border border-line/50 bg-white/[0.03] px-2 py-1 font-mono text-[11px]">
+      <span className="min-w-[8.5rem] rounded-md border border-line/70 bg-base px-2.5 py-1 font-mono text-[11px] text-ink">
         {source}
       </span>
       <ArrowRight className="h-3.5 w-3.5 shrink-0 text-brand" />
-      <span className="rounded border border-brand/20 bg-brand/[0.07] px-2 py-1 font-mono text-[11px] text-brand">
+      <span className="rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1 font-mono text-[11px] font-medium text-brand">
         {target}
       </span>
-      {note && (
-        <span className="text-[10.5px] text-black/40 dark:text-white/30">{note}</span>
-      )}
+      {note && <span className="text-[10.5px] text-faint">{note}</span>}
     </div>
   );
 }
 
-/**
- * A single, static reference page. Networking terminology is the most common
- * source of support questions, so the explanation lives in the panel instead
- * of only in the repository docs.
- */
 export function HelpPage() {
   return (
     <>
@@ -69,56 +62,56 @@ export function HelpPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Network className="h-4 w-4 text-brand" />
-                Ports & networking
+                Ports &amp; networking
               </CardTitle>
               <Badge>Start here</Badge>
             </CardHeader>
             <CardContent className="space-y-5">
-              <p className="max-w-3xl text-[12.5px] leading-6 text-black/60 dark:text-white/50">
-                A <strong className="font-medium text-current">container port</strong> belongs
-                to one application. A <strong className="font-medium text-current">host
+              <p className="max-w-3xl text-[12.5px] leading-6 text-muted">
+                A <strong className="font-semibold text-ink">container port</strong> belongs
+                to one application. A <strong className="font-semibold text-ink">host
                 port</strong> belongs to the VPS. They are different things even when the
                 number is the same.
               </p>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-md border border-line/50 bg-white/[0.025] p-3.5">
-                  <div className="flex items-center gap-2 text-[11px] text-black/45 dark:text-white/40">
+                <div className="rounded-lg border border-line/70 bg-recessed/55 p-3.5">
+                  <div className="flex items-center gap-2 text-[11px] text-muted">
                     <ContainerIcon className="h-3.5 w-3.5" />
                     Inside the application
                   </div>
                   <div className="mt-2 font-mono text-[22px] font-semibold tracking-tight text-brand">
                     3000
                   </div>
-                  <div className="mt-1 text-[12.5px] font-medium">Container port</div>
-                  <p className="mt-1 text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+                  <div className="mt-1 text-[12.5px] font-semibold text-ink">Container port</div>
+                  <p className="mt-1 text-[11.5px] leading-5 text-muted">
                     The port the process inside the container listens on. Every application
                     has its own network namespace, so <Code>app-a:3000</Code> and{" "}
                     <Code>app-b:3000</Code> do not collide.
                   </p>
                 </div>
 
-                <div className="rounded-md border border-line/50 bg-white/[0.025] p-3.5">
-                  <div className="flex items-center gap-2 text-[11px] text-black/45 dark:text-white/40">
+                <div className="rounded-lg border border-line/70 bg-recessed/55 p-3.5">
+                  <div className="flex items-center gap-2 text-[11px] text-muted">
                     <Server className="h-3.5 w-3.5" />
                     On the VPS
                   </div>
-                  <div className="mt-2 font-mono text-[22px] font-semibold tracking-tight">
+                  <div className="mt-2 font-mono text-[22px] font-semibold tracking-tight text-ink">
                     8001
                   </div>
-                  <div className="mt-1 text-[12.5px] font-medium">Host / VPS port</div>
-                  <p className="mt-1 text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+                  <div className="mt-1 text-[12.5px] font-semibold text-ink">Host / VPS port</div>
+                  <p className="mt-1 text-[11.5px] leading-5 text-muted">
                     A port published by Docker on the machine itself. Host ports are global,
                     so two containers cannot publish the same host port at the same time.
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-md border border-brand/20 bg-brand/[0.05] px-3.5 py-3">
+              <div className="rounded-lg border border-brand/25 bg-brand/8 px-3.5 py-3">
                 <div className="flex items-start gap-2.5">
                   <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-                  <p className="text-[12px] leading-5 text-black/65 dark:text-white/55">
-                    <strong className="font-medium text-current">The rule:</strong> container
+                  <p className="text-[12px] leading-5 text-muted">
+                    <strong className="font-semibold text-ink">The rule:</strong> container
                     ports are per app; host ports are global. Two applications can both use
                     container port <Code>3000</Code> without any conflict.
                   </p>
@@ -126,44 +119,44 @@ export function HelpPage() {
               </div>
 
               <section className="space-y-2">
-                <h3 className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+                <h3 className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                   <Globe2 className="h-3.5 w-3.5 text-brand" />
                   Domain routing — recommended
                 </h3>
-                <p className="text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+                <p className="text-[11.5px] leading-5 text-muted">
                   Traefik listens on the VPS and forwards requests to the application over
                   the private Docker network. No host port needs to be published.
                 </p>
-                <div className="overflow-x-auto rounded-md border border-line/50 bg-black/[0.12] p-3 dark:bg-black/20">
+                <div className="overflow-x-auto rounded-lg border border-line/70 bg-recessed p-3">
                   <div className="min-w-[32rem] space-y-2">
                     <PortFlowRow source="Internet :80 / :443" target="Traefik" />
                     <PortFlowRow source="Traefik" target="app-a:3000" note="domain A" />
                     <PortFlowRow source="Traefik" target="app-b:3000" note="domain B" />
                   </div>
                 </div>
-                <p className="text-[10.5px] leading-5 text-black/40 dark:text-white/30">
+                <p className="text-[10.5px] leading-5 text-faint">
                   Both apps can listen on 3000. The network name in front of the port is what
                   keeps them apart.
                 </p>
               </section>
 
               <section className="space-y-2">
-                <h3 className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+                <h3 className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
                   <Server className="h-3.5 w-3.5 text-brand" />
                   Direct VPS access — only if you need it
                 </h3>
-                <p className="text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+                <p className="text-[11.5px] leading-5 text-muted">
                   A port mapping publishes a container port on the VPS. Only the host side
                   needs to be unique; the container side can stay the same.
                 </p>
-                <div className="overflow-x-auto rounded-md border border-line/50 bg-black/[0.12] p-3 dark:bg-black/20">
+                <div className="overflow-x-auto rounded-lg border border-line/70 bg-recessed p-3">
                   <div className="min-w-[32rem] space-y-2">
                     <PortFlowRow source="VPS :8001" target="app-a:3000" />
                     <PortFlowRow source="VPS :8002" target="app-b:3000" />
                   </div>
                 </div>
-                <p className="text-[10.5px] leading-5 text-black/40 dark:text-white/30">
-                  With a domain, leave <strong className="font-medium">Port mappings</strong>{" "}
+                <p className="text-[10.5px] leading-5 text-faint">
+                  With a domain, leave <strong className="font-medium text-ink">Port mappings</strong>{" "}
                   empty. Publish ports only for direct IP access or another service that
                   needs to connect from outside Docker.
                 </p>
@@ -181,38 +174,38 @@ export function HelpPage() {
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[34rem] text-left text-[11.5px]">
-                  <thead className="border-b border-line/50 text-[10.5px] uppercase tracking-wide text-black/40 dark:text-white/30">
+                  <thead className="border-b border-line/60 bg-recessed/35 text-[10.5px] uppercase tracking-wide text-muted">
                     <tr>
                       <th className="px-4 py-2.5 font-medium">Field</th>
                       <th className="px-4 py-2.5 font-medium">Means</th>
                       <th className="px-4 py-2.5 font-medium">Typical value</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-line/40">
+                  <tbody className="divide-y divide-line/45">
                     <tr>
-                      <td className="px-4 py-3 font-medium">Networking → Container port</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Networking → Container port</td>
+                      <td className="px-4 py-3 text-muted">
                         Port the app process listens on inside the container.
                       </td>
                       <td className="px-4 py-3 font-mono text-brand">3000</td>
                     </tr>
                     <tr>
-                      <td className="px-4 py-3 font-medium">Networking → Port mappings</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Networking → Port mappings</td>
+                      <td className="px-4 py-3 text-muted">
                         Optional <Code>hostPort:containerPort</Code>. For direct VPS access.
                       </td>
                       <td className="px-4 py-3 font-mono text-brand">8001:3000</td>
                     </tr>
                     <tr>
-                      <td className="px-4 py-3 font-medium">Domains → Internal port</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Domains → Internal port</td>
+                      <td className="px-4 py-3 text-muted">
                         Per-domain override. Blank inherits the container port.
                       </td>
                       <td className="px-4 py-3 font-mono text-brand">blank</td>
                     </tr>
                     <tr>
-                      <td className="px-4 py-3 font-medium">Domains → WWW redirect</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Domains → WWW redirect</td>
+                      <td className="px-4 py-3 text-muted">
                         Routes both the apex and <Code>www</Code> name, then permanently
                         redirects the alternate to the canonical host. Both DNS names must
                         point here.
@@ -220,16 +213,16 @@ export function HelpPage() {
                       <td className="px-4 py-3 font-mono text-brand">no redirect</td>
                     </tr>
                     <tr>
-                      <td className="px-4 py-3 font-medium">Domains → Search indexing</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Domains → Search indexing</td>
+                      <td className="px-4 py-3 text-muted">
                         Indexable allows crawlers. No index adds the real{" "}
                         <Code>X-Robots-Tag: none</Code> response header.
                       </td>
                       <td className="px-4 py-3 font-mono text-brand">indexable</td>
                     </tr>
                     <tr>
-                      <td className="px-4 py-3 font-medium">Environment → PORT</td>
-                      <td className="px-4 py-3 text-black/50 dark:text-white/40">
+                      <td className="px-4 py-3 font-medium text-ink">Environment → PORT</td>
+                      <td className="px-4 py-3 text-muted">
                         Meghify passes the container port as <Code>PORT</Code> unless the app
                         defines it itself.
                       </td>
@@ -245,18 +238,18 @@ export function HelpPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-brand" />
-                HTTPS & certificates
+                HTTPS &amp; certificates
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-[11.5px] leading-5 text-black/50 dark:text-white/40">
-                A domain marked <strong className="font-medium text-current">HTTP → HTTPS</strong>{" "}
+              <p className="text-[11.5px] leading-5 text-muted">
+                A domain marked <strong className="font-semibold text-ink">HTTP → HTTPS</strong>{" "}
                 gets a TLS router immediately. The certificate itself is requested from Let's
                 Encrypt by Traefik and can take a minute after DNS matches.
               </p>
-              <div className="rounded-md border border-line/50 bg-white/[0.025] p-3">
-                <div className="text-[11.5px] font-medium">Requirements</div>
-                <ul className="mt-1 space-y-1 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+              <div className="rounded-lg border border-line/70 bg-recessed/55 p-3">
+                <div className="text-[11.5px] font-semibold text-ink">Requirements</div>
+                <ul className="mt-1 space-y-1 text-[11px] leading-5 text-muted">
                   <li>
                     <Code>ACME_EMAIL</Code> set in the panel environment, or an admin
                     account whose signup email is used as the fallback
@@ -265,7 +258,7 @@ export function HelpPage() {
                   <li>VPS ports 80 and 443 open in the firewall</li>
                 </ul>
               </div>
-              <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+              <p className="text-[11px] leading-5 text-faint">
                 The Domains table shows the effective Let's Encrypt account. Use the
                 shield action on a row to inspect the certificate browsers receive:
                 issuer, validity, DNS names and whether the chain is trusted. If it
@@ -285,7 +278,7 @@ export function HelpPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="mb-3 text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+              <p className="mb-3 text-[11.5px] leading-5 text-muted">
                 <Code>502 Bad Gateway</Code> means Traefik reached the container but the
                 application did not answer on the port the route targets. Work through
                 these checks in order:
@@ -293,12 +286,12 @@ export function HelpPage() {
               <ol className="space-y-2.5">
                 {[
                   <>
-                    Open <strong className="font-medium">Runtime logs</strong> and find the
+                    Open <strong className="font-semibold text-ink">Runtime logs</strong> and find the
                     actual listening port. A healthy app usually prints{" "}
                     <Code>listening on 0.0.0.0:3000</Code>.
                   </>,
                   <>
-                    Set <strong className="font-medium">Networking → Container port</strong>{" "}
+                    Set <strong className="font-semibold text-ink">Networking → Container port</strong>{" "}
                     to that number. Do not change it just because another app uses the same
                     number.
                   </>,
@@ -312,17 +305,15 @@ export function HelpPage() {
                     it or set it to the same value as the container port.
                   </>,
                   <>
-                    Clear <strong className="font-medium">Domains → Internal port</strong> so
+                    Clear <strong className="font-semibold text-ink">Domains → Internal port</strong> so
                     the domain follows the application port, then redeploy.
                   </>,
                 ].map((step, index) => (
                   <li key={index} className="flex gap-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[10px] font-semibold text-brand">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/12 text-[10px] font-semibold text-brand">
                       {index + 1}
                     </span>
-                    <span className="text-[11.5px] leading-5 text-black/60 dark:text-white/50">
-                      {step}
-                    </span>
+                    <span className="text-[11.5px] leading-5 text-muted">{step}</span>
                   </li>
                 ))}
               </ol>
@@ -337,29 +328,29 @@ export function HelpPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-[11.5px] leading-5 text-black/50 dark:text-white/40">
+              <p className="text-[11.5px] leading-5 text-muted">
                 This is a valid setup and the recommended default. It does not matter that
                 another application is already using 3000 on the VPS.
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border border-line/50 bg-white/[0.025] p-3">
-                  <div className="text-[12px] font-medium">App A — my-api</div>
-                  <div className="mt-1.5 space-y-1 font-mono text-[10.5px] text-black/50 dark:text-white/40">
+                <div className="rounded-lg border border-line/70 bg-recessed/55 p-3">
+                  <div className="text-[12px] font-semibold text-ink">App A — my-api</div>
+                  <div className="mt-1.5 space-y-1 font-mono text-[10.5px] text-muted">
                     <div>container port: 3000</div>
                     <div>host mapping: none</div>
                     <div className="text-brand">domain: api.example.com</div>
                   </div>
                 </div>
-                <div className="rounded-md border border-line/50 bg-white/[0.025] p-3">
-                  <div className="text-[12px] font-medium">App B — my-web</div>
-                  <div className="mt-1.5 space-y-1 font-mono text-[10.5px] text-black/50 dark:text-white/40">
+                <div className="rounded-lg border border-line/70 bg-recessed/55 p-3">
+                  <div className="text-[12px] font-semibold text-ink">App B — my-web</div>
+                  <div className="mt-1.5 space-y-1 font-mono text-[10.5px] text-muted">
                     <div>container port: 3000</div>
                     <div>host mapping: none</div>
                     <div className="text-brand">domain: www.example.com</div>
                   </div>
                 </div>
               </div>
-              <p className="text-[10.5px] leading-5 text-black/40 dark:text-white/30">
+              <p className="text-[10.5px] leading-5 text-faint">
                 Only if you want direct VPS access do you need different host ports:
                 use <Code>8001:3000</Code> for App A and <Code>8002:3000</Code> for App B.
               </p>
@@ -391,11 +382,9 @@ export function HelpPage() {
                   answer: "The route moved to 3001, but the app still listened on 3000.",
                 },
               ].map((item) => (
-                <div key={item.question} className="border-b border-line/40 pb-3 last:border-0 last:pb-0">
-                  <div className="text-[11.5px] font-medium">{item.question}</div>
-                  <p className="mt-0.5 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
-                    {item.answer}
-                  </p>
+                <div key={item.question} className="border-b border-line/50 pb-3 last:border-0 last:pb-0">
+                  <div className="text-[11.5px] font-semibold text-ink">{item.question}</div>
+                  <p className="mt-0.5 text-[11px] leading-5 text-muted">{item.answer}</p>
                 </div>
               ))}
             </CardContent>
@@ -409,17 +398,17 @@ export function HelpPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+              <p className="text-[11px] leading-5 text-muted">
                 These show what Docker published and what the host is already using.
               </p>
-              <pre className="overflow-x-auto rounded-md border border-line/50 bg-black/[0.18] p-2.5 font-mono text-[10.5px] leading-5 text-black/65 dark:text-white/55">
+              <pre className="overflow-x-auto rounded-lg border border-line/70 bg-[#111217] p-3 font-mono text-[10.5px] leading-5 text-zinc-200">
                 {`docker ps --format \\
   'table {{.Names}}\\t{{.Ports}}'
 
 ss -ltnp | grep -E \\
   ':3000|:3001|:8000|:8080'`}
               </pre>
-              <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+              <p className="text-[11px] leading-5 text-muted">
                 If a host port is already taken, choose another host port for the mapping.
                 The application's internal port can stay the same.
               </p>
@@ -433,15 +422,15 @@ ss -ltnp | grep -E \\
             <CardContent className="space-y-2.5 text-[11.5px]">
               <Link
                 to="/projects"
-                className="flex items-center justify-between gap-2 rounded-md border border-line/50 px-2.5 py-2 transition-colors hover:bg-white/[0.03]"
+                className="flex items-center justify-between gap-2 rounded-lg border border-line/70 bg-recessed/50 px-3 py-2 font-medium text-ink transition-colors hover:bg-recessed"
               >
                 Projects
-                <ArrowRight className="h-3.5 w-3.5 text-black/35 dark:text-white/30" />
+                <ArrowRight className="h-3.5 w-3.5 text-muted" />
               </Link>
-              <p className="text-[10.5px] leading-5 text-black/45 dark:text-white/35">
-                Open an application and use <strong className="font-medium">Networking</strong>{" "}
+              <p className="text-[11px] leading-5 text-muted">
+                Open an application and use <strong className="font-semibold text-ink">Networking</strong>{" "}
                 for the container port and mappings, or{" "}
-                <strong className="font-medium">Runtime logs</strong> for its actual listener.
+                <strong className="font-semibold text-ink">Runtime logs</strong> for its actual listener.
               </p>
             </CardContent>
           </Card>

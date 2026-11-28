@@ -52,8 +52,6 @@ export function TeamPage() {
     onSuccess: async (_data, variables) => {
       toast.success("Role updated");
       await queryClient.invalidateQueries({ queryKey: ["users"] });
-      // Demoting yourself must update the navigation and action gates in this
-      // tab immediately; the API already enforces the new role on every call.
       if (variables.user.id === currentUser?.id) {
         await queryClient.invalidateQueries({ queryKey: ["session"] });
       }
@@ -104,18 +102,21 @@ export function TeamPage() {
               return (
                 <Tr key={user.id}>
                   <Td>
-                    <div className="font-medium">
+                    <div className="font-medium text-ink">
                       {user.name || user.email}
                       {isSelf && (
-                        <span className="ml-1.5 text-[10px] text-black/35 dark:text-white/30">you</span>
+                        <span className="ml-1.5 rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                          you
+                        </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-black/45 dark:text-white/40">{user.email}</div>
+                    <div className="text-[11px] text-muted">{user.email}</div>
                   </Td>
                   <Td>
                     <Select
                       value={user.role}
                       disabled={updateRole.isPending}
+                      className="w-32"
                       onChange={(event) =>
                         updateRole.mutate({ user, role: event.target.value })
                       }
@@ -124,8 +125,8 @@ export function TeamPage() {
                       <option value="admin">admin</option>
                     </Select>
                   </Td>
-                  <Td>{user.totpEnabled ? "enabled" : "off"}</Td>
-                  <Td align="right" className="text-black/45 dark:text-white/40">
+                  <Td className="text-muted">{user.totpEnabled ? "enabled" : "off"}</Td>
+                  <Td align="right" className="text-faint">
                     {new Date(user.createdAt).toLocaleDateString()}
                   </Td>
                   <Td align="right">
@@ -163,25 +164,23 @@ export function TeamPage() {
             {(tokens.data ?? []).map((token) => (
               <Tr key={token.id}>
                 <Td>
-                  <div className="flex items-center gap-1.5">
-                    <KeyRound className="h-3.5 w-3.5 opacity-50" />
+                  <div className="flex items-center gap-1.5 font-medium text-ink">
+                    <KeyRound className="h-3.5 w-3.5 text-muted" />
                     {token.name || "unnamed"}
                   </div>
                 </Td>
-                <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
-                  {token.prefix}...
-                </Td>
-                <Td align="right" className="text-black/45 dark:text-white/40">
+                <Td className="font-mono text-[12px] text-muted">{token.prefix}...</Td>
+                <Td align="right" className="text-faint">
                   {new Date(token.createdAt).toLocaleDateString()}
                 </Td>
               </Tr>
             ))}
             {(tokens.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-center text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={3} className="px-4 py-8 text-center text-[12px] text-muted">
                   No API tokens issued.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>
@@ -237,7 +236,7 @@ export function TeamPage() {
               value={form.password}
               onChange={(event) => setForm({ ...form, password: event.target.value })}
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1 text-[10.5px] text-faint">
               At least 10 characters. Share it over a trusted channel.
             </p>
           </div>

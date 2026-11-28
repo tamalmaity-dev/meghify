@@ -1,6 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronDown, Copy, Download, Github, Globe, Play, Plus, RefreshCw, RotateCcw, Scissors, Search, Settings, ShieldCheck, Square, Terminal, Trash2, TriangleAlert } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Cpu,
+  Download,
+  FileText,
+  Github,
+  Globe,
+  HardDrive,
+  History,
+  KeyRound,
+  Network,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Scissors,
+  ScrollText,
+  Search,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  Square,
+  Terminal,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, formatDate, streamEvents } from "@/lib/api";
@@ -28,17 +54,17 @@ import type {
 import { createFileRoute } from "@tanstack/react-router";
 
 const SECTIONS = [
-  { key: "general", label: "General" },
-  { key: "terminal", label: "Terminal" },
-  { key: "domains", label: "Domains" },
-  { key: "environment", label: "Environment" },
-  { key: "volumes", label: "Persistent storage" },
-  { key: "networking", label: "Networking" },
-  { key: "runtime", label: "Runtime" },
-  { key: "logs", label: "Deployment logs" },
-  { key: "runtimeLogs", label: "Runtime logs" },
-  { key: "deployments", label: "Deployments" },
-  { key: "danger", label: "Danger zone" },
+  { key: "general", label: "General", icon: Settings },
+  { key: "terminal", label: "Terminal", icon: Terminal },
+  { key: "domains", label: "Domains", icon: Globe },
+  { key: "environment", label: "Environment", icon: KeyRound },
+  { key: "volumes", label: "Persistent storage", icon: HardDrive },
+  { key: "networking", label: "Networking", icon: Network },
+  { key: "runtime", label: "Runtime", icon: Cpu },
+  { key: "logs", label: "Deployment logs", icon: ScrollText },
+  { key: "runtimeLogs", label: "Runtime logs", icon: FileText },
+  { key: "deployments", label: "Deployments", icon: History },
+  { key: "danger", label: "Danger zone", icon: ShieldAlert },
 ] as const;
 
 type Section = (typeof SECTIONS)[number]["key"];
@@ -242,7 +268,7 @@ export function ApplicationDetailPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {application && <StatusBadge status={application.status} />}
-        <span className="font-mono text-[12px] text-black/55 dark:text-white/45">
+        <span className="font-mono text-[12px] text-muted">
           {application?.imageTag || "no image yet"}
         </span>
         {application && (
@@ -253,37 +279,44 @@ export function ApplicationDetailPage() {
             onManage={isAdmin ? () => setSection("domains") : undefined}
           />
         )}
-        {active && <span className="text-[11px] text-warn">{active.status}…</span>}
+        {active && <span className="text-[11px] font-medium text-warn">{active.status}…</span>}
       </div>
 
       {guardStopRecent && guardStop && (
-        <div className="mb-4 flex items-start gap-2 rounded-md bg-warn/10 px-3 py-2 text-[11.5px] leading-relaxed text-warn">
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[11.5px] leading-relaxed text-warn">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            <strong className="font-medium">Stopped by Resource Guard.</strong> {guardStop.message}{" "}
+            <strong className="font-semibold">Stopped by Resource Guard.</strong> {guardStop.message}{" "}
             Start the application again only after fixing the resource usage, or turn protection
             off from Runtime.
           </span>
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-        <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-          {sections.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => setSection(item.key)}
-              className={cn(
-                "h-8 rounded-md px-3 text-left text-[12px] whitespace-nowrap transition-colors",
-                section === item.key
-                  ? "bg-black/[0.06] font-medium text-current dark:bg-white/[0.08]"
-                  : "text-black/55 hover:bg-black/[0.03] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.04]",
-                item.key === "danger" && section !== "danger" && "text-danger/80 hover:text-danger",
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
+      <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+        <nav className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          {sections.map((item) => {
+            const Icon = item.icon;
+            const activeTab = section === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setSection(item.key)}
+                className={cn(
+                  "flex h-8.5 items-center gap-2 rounded-lg px-2.5 text-left text-[12.5px] whitespace-nowrap transition-colors cursor-pointer",
+                  activeTab
+                    ? item.key === "danger"
+                      ? "bg-danger/12 font-medium text-danger"
+                      : "bg-brand/12 font-medium text-brand"
+                    : "text-muted hover:bg-recessed hover:text-ink",
+                  item.key === "danger" && !activeTab && "text-danger/80 hover:bg-danger/8 hover:text-danger",
+                )}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="min-w-0">
@@ -312,17 +345,17 @@ export function ApplicationDetailPage() {
               </div>
             ) : (
               <Card>
-                <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                <CardContent className="py-8 text-center text-[12px] text-muted">
                   Loading application…
                 </CardContent>
               </Card>
             ))}
 
           {section === "terminal" && (
-            <Card>
+            <Card className="overflow-hidden">
               <CardHeader>
                 <CardTitle>Terminal</CardTitle>
-                <span className="text-[11px] text-black/40 dark:text-white/35">
+                <span className="text-[11px] text-faint">
                   {application?.status === "running"
                     ? "shell inside the running container"
                     : "container is not running"}
@@ -330,7 +363,7 @@ export function ApplicationDetailPage() {
               </CardHeader>
               <CardContent className="p-0">
                 {application?.status === "running" ? (
-                  <div className="h-[26rem] overflow-hidden rounded-b-[8px] bg-[#0a0a0a]">
+                  <div className="h-[26rem] overflow-hidden">
                     <XTerminal
                       url={`${
                         window.location.protocol === "https:" ? "wss" : "ws"
@@ -342,7 +375,7 @@ export function ApplicationDetailPage() {
                     />
                   </div>
                 ) : (
-                  <p className="px-4 py-10 text-center text-[12px] text-black/45 dark:text-white/40">
+                  <p className="px-4 py-10 text-center text-[12px] text-muted">
                     The container is not running — deploy the application to open a shell.
                   </p>
                 )}
@@ -380,7 +413,7 @@ export function ApplicationDetailPage() {
               </CardHeader>
               <CardContent className="p-0">
                 {(volumes.data ?? []).length === 0 ? (
-                  <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+                  <p className="px-4 py-6 text-center text-[12px] text-muted">
                     No volumes mounted.
                   </p>
                 ) : (
@@ -395,11 +428,13 @@ export function ApplicationDetailPage() {
                   >
                     {(volumes.data ?? []).map((volume) => (
                       <Tr key={volume.id}>
-                        <Td>{volume.name}</Td>
-                        <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
+                        <Td className="font-medium text-ink">{volume.name}</Td>
+                        <Td className="font-mono text-[12px] text-muted">
                           {volume.mountPath}
                         </Td>
-                        <Td align="right">{volume.readOnly ? "yes" : "no"}</Td>
+                        <Td align="right" className="text-muted">
+                          {volume.readOnly ? "yes" : "no"}
+                        </Td>
                       </Tr>
                     ))}
                   </Table>
@@ -412,7 +447,7 @@ export function ApplicationDetailPage() {
             <DeploymentLogs deployment={watched} serverName={serverName} />
           )}
 
-          {section === "runtime" && (
+          {section === "runtimeLogs" && (
             <RuntimeLogs
               applicationId={applicationId}
               running={application?.status === "running"}
@@ -546,7 +581,7 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
     <Card>
       <CardHeader>
         <CardTitle>Source</CardTitle>
-        <span className="flex items-center gap-1.5 text-[11px] text-black/40 dark:text-white/35">
+        <span className="flex items-center gap-1.5 text-[11px] text-faint">
           <Github className="h-3.5 w-3.5" />
           GitHub App
         </span>
@@ -554,7 +589,7 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
       <CardContent className="space-y-3 text-[12px]">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-black/50 dark:text-white/45">Repository</span>
+            <span className="text-muted">Repository</span>
             {webUrl ? (
               <a
                 href={webUrl}
@@ -565,7 +600,7 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
                 {app.repositoryFullName || webUrl}
               </a>
             ) : (
-              <span className="truncate font-mono text-[11.5px]">
+              <span className="truncate font-mono text-[11.5px] text-ink">
                 {app.repositoryFullName || "-"}
               </span>
             )}
@@ -573,10 +608,10 @@ function GitHubCard({ app, applicationId }: { app: Application; applicationId: s
           <Row label="Branch" value={app.gitBranch || "main"} />
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-line/60 bg-recessed px-3 py-2.5">
           <div className="min-w-0">
-            <div className="text-[12px] font-medium">Deploy on every push</div>
-            <div className="text-[10.5px] text-black/40 dark:text-white/30">
+            <div className="text-[12px] font-medium text-ink">Deploy on every push</div>
+            <div className="text-[10.5px] text-muted">
               {autoDeploy
                 ? `Pushes to ${app.gitBranch || "main"} redeploy this application through the GitHub webhook.`
                 : "Pushes are ignored; deploys only run when you press Deploy."}
@@ -628,11 +663,11 @@ function AccessCard({
       </CardHeader>
       <CardContent className="space-y-4 text-[12px]">
         <div>
-          <div className="text-[11px] tracking-wider text-black/40 uppercase dark:text-white/35">
+          <div className="text-[10.5px] font-semibold tracking-wider text-faint uppercase">
             Public access
           </div>
           {publicHost ? (
-            <div className="mt-1.5 flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2">
+            <div className="mt-1.5 flex items-center justify-between gap-3 rounded-lg border border-line/60 bg-recessed px-3 py-2.5">
               <div className="min-w-0">
                 <a
                   href={`${scheme}://${publicHost}`}
@@ -642,7 +677,7 @@ function AccessCard({
                 >
                   {publicHost}
                 </a>
-                <div className="text-[10.5px] text-black/40 dark:text-white/30">
+                <div className="text-[10.5px] text-muted">
                   {domains.length > 1
                     ? `${domains.length} domains attached`
                     : primary
@@ -659,11 +694,11 @@ function AccessCard({
               )}
             </div>
           ) : (
-            <p className="mt-1 text-black/45 dark:text-white/40">
+            <p className="mt-1 text-muted">
               {canEdit ? (
                 <>
                   No public URL yet.{" "}
-                  <button className="text-brand hover:underline" onClick={onManageDomains}>
+                  <button className="font-medium text-brand hover:underline" onClick={onManageDomains}>
                     Add a domain
                   </button>{" "}
                   to expose this application over HTTP.
@@ -677,7 +712,7 @@ function AccessCard({
 
         <div>
           <div className="flex items-center justify-between">
-            <div className="text-[11px] tracking-wider text-black/40 uppercase dark:text-white/35">
+            <div className="text-[10.5px] font-semibold tracking-wider text-faint uppercase">
               Internal access
             </div>
             {canEdit && (
@@ -686,15 +721,15 @@ function AccessCard({
               </Button>
             )}
           </div>
-          <div className="mt-1.5 space-y-1.5">
+          <div className="mt-2 space-y-1.5">
             <Row label="Container name" value={containerName(app)} />
             <Row label="Docker network" value={networkName(app)} />
             <Row label="Exposed port" value={String(app.port)} />
             <Row label="Port mappings" value={app.portMappings || "none"} />
           </div>
-          <p className="mt-2 text-[10.5px] text-black/35 dark:text-white/30">
+          <p className="mt-2 text-[10.5px] text-faint">
             Reachable from other containers on the same network as{" "}
-            <span className="font-mono">
+            <span className="font-mono text-ink">
               {containerName(app)}:{app.port}
             </span>
             .
@@ -910,7 +945,7 @@ function DomainsCard({
       <Card>
         <CardHeader>
           <CardTitle>Domains</CardTitle>
-          <span className="text-[11px] text-black/40 dark:text-white/35">
+          <span className="text-[11px] text-faint">
             {domains.length === 1 ? "1 domain" : `${domains.length} domains`}
           </span>
         </CardHeader>
@@ -918,7 +953,7 @@ function DomainsCard({
           <TableToolbar
             left={
               <div className="relative max-w-sm">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -945,8 +980,8 @@ function DomainsCard({
               </>
             }
           />
-          <div className="flex items-center justify-end gap-2 border-b border-line/40 px-3 py-2">
-            <span className="text-[11px] text-black/50 dark:text-white/45">
+          <div className="flex items-center justify-end gap-2 border-b border-line/50 px-3.5 py-2">
+            <span className="text-[11px] text-muted">
               Redirect HTTP to HTTPS
             </span>
             <Select
@@ -958,25 +993,25 @@ function DomainsCard({
               <option value="disabled">Disabled</option>
             </Select>
           </div>
-          <div className="flex items-start gap-2 border-b border-line/40 px-3 py-2 text-[10.5px] leading-5 text-black/45 dark:text-white/35">
+          <div className="flex items-start gap-2 border-b border-line/50 bg-recessed/35 px-3.5 py-2 text-[10.5px] leading-5 text-muted">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
             <span>
               HTTPS certificates are requested automatically once DNS matches. Let's Encrypt
               account:{" "}
-              <span className="font-mono text-[10px] text-black/65 dark:text-white/55">
+              <span className="font-mono text-[10px] text-ink">
                 {acmeEmail || "not configured"}
               </span>
-              . The panel uses <code className="font-mono text-[10px]">ACME_EMAIL</code> when set,
+              . The panel uses <code className="font-mono text-[10px] text-ink">ACME_EMAIL</code> when set,
               otherwise the first admin's signup email. Ports 80/443 must be open.
             </span>
           </div>
 
           {domains.length === 0 ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            <p className="px-4 py-6 text-center text-[12px] text-muted">
               No domains yet — add one, or redeploy to get an automatic sslip.io address.
             </p>
           ) : list.length === 0 ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            <p className="px-4 py-6 text-center text-[12px] text-muted">
               No domain matches that search.
             </p>
           ) : (
@@ -997,7 +1032,7 @@ function DomainsCard({
                 <Tr key={domain.id}>
                   <Td>
                     <span className="flex min-w-0 items-center gap-2">
-                      <Globe className="h-3.5 w-3.5 shrink-0 text-black/35 dark:text-white/30" />
+                      <Globe className="h-3.5 w-3.5 shrink-0 text-faint" />
                       <a
                         href={`${domain.tlsEnabled ? "https" : "http"}://${domain.host}${domain.path ?? ""}`}
                         target="_blank"
@@ -1012,22 +1047,22 @@ function DomainsCard({
                   <Td>
                     {domain.tlsEnabled ? (
                       domain.redirectHttps ? (
-                        <span className="text-[11.5px] text-ok">HTTP → HTTPS</span>
+                        <span className="text-[11.5px] font-medium text-ok">HTTP → HTTPS</span>
                       ) : (
-                        <span className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</span>
+                        <span className="text-[11.5px] text-muted">Disabled</span>
                       )
                     ) : (
-                      <span className="text-[11.5px] text-black/45 dark:text-white/40">Disabled</span>
+                      <span className="text-[11.5px] text-muted">Disabled</span>
                     )}
                   </Td>
-                  <Td className="text-[11.5px] text-black/45 dark:text-white/40">
+                  <Td className="text-[11.5px] text-muted">
                     {domain.wwwRedirect === "www"
                       ? "→ www"
                       : domain.wwwRedirect === "non-www"
                         ? "→ non-www"
                         : "Disabled"}
                   </Td>
-                  <Td className="font-mono text-[12px]">{domain.port || app.port}</Td>
+                  <Td className="font-mono text-[12px] text-ink">{domain.port || app.port}</Td>
                   <Td>
                     <input
                       type="checkbox"
@@ -1038,18 +1073,18 @@ function DomainsCard({
                   </Td>
                   <Td>
                     {domain.dnsStatus === "matches" ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/25 bg-ok/12 px-2 py-0.5 text-[10.5px] font-medium text-ok">
                         <span className="h-1.5 w-1.5 rounded-full bg-ok" />
                         DNS matches
                       </span>
                     ) : domain.dnsStatus === "mismatch" ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2 py-0.5 text-[10.5px] font-medium text-danger">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger/12 px-2 py-0.5 text-[10.5px] font-medium text-danger">
                         <span className="h-1.5 w-1.5 rounded-full bg-danger" />
                         DNS mismatch
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] font-medium text-black/50 dark:bg-white/[0.08] dark:text-white/45">
-                        <span className="h-1.5 w-1.5 rounded-full bg-black/25 dark:bg-white/25" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-line/70 bg-subtle/75 px-2 py-0.5 text-[10.5px] font-medium text-muted">
+                        <span className="h-1.5 w-1.5 rounded-full bg-faint" />
                         Not checked
                       </span>
                     )}
@@ -1160,7 +1195,7 @@ function DomainsCard({
                 onChange={(event) => setForm({ ...form, port: event.target.value })}
                 placeholder={String(app.port)}
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Leave blank to follow the application's container port.
               </p>
             </div>
@@ -1173,7 +1208,7 @@ function DomainsCard({
               onChange={(event) => setForm({ ...form, path: event.target.value })}
               placeholder="/api/v3"
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+            <p className="mt-1 text-[10.5px] text-faint">
               Optional path prefix routed to this application; leave empty for every path.
             </p>
           </div>
@@ -1202,7 +1237,7 @@ function DomainsCard({
                 <option value="www">Redirect to www</option>
                 <option value="non-www">Redirect to non-www</option>
               </Select>
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Both names must resolve to this server.
               </p>
             </div>
@@ -1264,11 +1299,11 @@ function DomainsCard({
                         ? "Untrusted certificate"
                         : "Invalid certificate"}
                   </span>
-                  <span className="text-black/40 dark:text-white/30">
+                  <span className="text-faint">
                     {certificate.valid ? "Hostname and dates are valid" : "Check DNS and proxy logs"}
                   </span>
                 </div>
-                <div className="divide-y divide-line/50 rounded-md border border-line/60 px-3 py-2">
+                <div className="divide-y divide-line/50 rounded-lg border border-line/70 bg-recessed/40 px-3 py-2">
                   <Row label="Host" value={certificate.host} />
                   <Row label="Issuer" value={certificate.issuerCommonName || certificate.issuer || "-"} />
                   <Row label="Subject" value={certificate.subject || "-"} />
@@ -1277,7 +1312,7 @@ function DomainsCard({
                   <Row label="DNS names" value={(certificate.dnsNames ?? []).join(", ") || "-"} />
                 </div>
                 {!certificate.trusted && (
-                  <div className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-warn">
+                  <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn">
                     <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>
                       Browsers will not trust this certificate. The proxy may still be serving its
@@ -1297,9 +1332,9 @@ function DomainsCard({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-black/45 dark:text-white/40">{label}</span>
-      <span className="truncate font-mono text-[12px]">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 py-1">
+      <span className="text-muted">{label}</span>
+      <span className="truncate font-mono text-[12px] text-ink">{value}</span>
     </div>
   );
 }
@@ -1332,7 +1367,7 @@ function DeploymentHistory({
     <Card>
       <CardHeader>
         <CardTitle>Deployment history</CardTitle>
-        <span className="text-[11px] text-black/40 dark:text-white/35">
+        <span className="text-[11px] text-faint">
           {deployments.length === 1 ? "1 deployment" : `${deployments.length} deployments`}
         </span>
       </CardHeader>
@@ -1340,7 +1375,7 @@ function DeploymentHistory({
         <TableToolbar
           left={
             <div className="relative max-w-sm">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -1351,11 +1386,9 @@ function DeploymentHistory({
           }
         />
         {deployments.length === 0 ? (
-          <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-            No deployments yet.
-          </p>
+          <p className="px-4 py-6 text-center text-[12px] text-muted">No deployments yet.</p>
         ) : list.length === 0 ? (
-          <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+          <p className="px-4 py-6 text-center text-[12px] text-muted">
             No deployment matches that search.
           </p>
         ) : (
@@ -1376,28 +1409,28 @@ function DeploymentHistory({
                 <Td>
                   <DeploymentStatus status={deployment.status} />
                 </Td>
-                <Td className="text-black/55 dark:text-white/45">
+                <Td className="text-muted">
                   {deployment.trigger === "webhook"
                     ? "Webhook"
                     : deployment.trigger.charAt(0).toUpperCase() + deployment.trigger.slice(1)}
                 </Td>
                 <Td>
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0 font-mono text-[11.5px]">
+                    <span className="shrink-0 font-mono text-[11.5px] text-ink">
                       {deployment.commitSha ? deployment.commitSha.slice(0, 7) : "—"}
                     </span>
-                    <span className="truncate text-[11.5px] text-black/55 dark:text-white/45">
+                    <span className="truncate text-[11.5px] text-muted">
                       {deployment.commitMessage || ""}
                     </span>
                   </span>
                 </Td>
-                <Td className="text-black/55 dark:text-white/45">
+                <Td className="text-muted">
                   {relativeTime(deployment.startedAt ?? deployment.queuedAt)}
                 </Td>
-                <Td className="font-mono text-[11.5px] text-black/55 dark:text-white/45">
+                <Td className="font-mono text-[11.5px] text-muted">
                   {deploymentDuration(deployment)}
                 </Td>
-                <Td className="text-black/55 dark:text-white/45">{serverName}</Td>
+                <Td className="text-muted">{serverName}</Td>
               </Tr>
             ))}
           </Table>
@@ -1411,7 +1444,7 @@ function DeploymentHistory({
 const DEPLOYMENT_TONES: Record<string, { label: string; dot: string; text: string; pulse?: boolean }> = {
   success: { label: "Success", dot: "bg-ok", text: "text-ok" },
   failed: { label: "Failed", dot: "bg-danger", text: "text-danger" },
-  canceled: { label: "Canceled", dot: "bg-black/30 dark:bg-white/25", text: "text-black/50 dark:text-white/45" },
+  canceled: { label: "Canceled", dot: "bg-faint", text: "text-muted" },
   queued: { label: "Queued", dot: "bg-warn", text: "text-warn", pulse: true },
   building: { label: "Building", dot: "bg-brand", text: "text-brand", pulse: true },
   pushing: { label: "Pushing", dot: "bg-brand", text: "text-brand", pulse: true },
@@ -1421,8 +1454,8 @@ const DEPLOYMENT_TONES: Record<string, { label: string; dot: string; text: strin
 function DeploymentStatus({ status }: { status: string }) {
   const tone = DEPLOYMENT_TONES[status] ?? {
     label: status,
-    dot: "bg-black/30 dark:bg-white/25",
-    text: "text-black/60 dark:text-white/50",
+    dot: "bg-faint",
+    text: "text-muted",
   };
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-[12px] font-medium", tone.text)}>
@@ -1530,7 +1563,7 @@ function DeploymentLogs({
   if (!deployment) {
     return (
       <Card>
-        <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+        <CardContent className="py-8 text-center text-[12px] text-muted">
           This application has never been deployed, so there are no build logs.
         </CardContent>
       </Card>
@@ -1548,11 +1581,11 @@ function DeploymentLogs({
   };
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle>Build output</CardTitle>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="hidden font-mono text-[11px] text-black/40 sm:block dark:text-white/35">
+          <span className="hidden font-mono text-[11px] text-faint sm:block">
             {deployment.commitSha ? deployment.commitSha.slice(0, 7) : deployment.id.slice(0, 8)} ·{" "}
             {serverName}
           </span>
@@ -1582,7 +1615,7 @@ function DeploymentLogs({
         <TableToolbar
           left={
             <div className="relative max-w-sm">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -1594,7 +1627,7 @@ function DeploymentLogs({
           right={
             <>
               {needle && (
-                <span className="text-[11px] text-black/45 dark:text-white/40">
+                <span className="text-[11px] text-muted">
                   {matches === 1 ? "1 match" : `${matches} matches`}
                 </span>
               )}
@@ -1618,7 +1651,7 @@ function DeploymentLogs({
             </>
           }
         />
-        <pre className="max-h-[26rem] overflow-auto rounded-b-[8px] bg-black/40 p-3 font-mono text-[11px] leading-relaxed">
+        <pre className="max-h-[26rem] overflow-auto rounded-b-xl bg-[#0f1117] p-3.5 font-mono text-[11px] leading-relaxed text-zinc-200">
           {lines.map((line, index) => (
             <LogLine key={index} line={line} needle={needle} />
           ))}
@@ -1637,7 +1670,7 @@ function LogLine({ line, needle }: { line: string; needle: string }) {
     <div className={cn(logTone(line), needle !== "" && !match && "opacity-40")}>
       {parts.map((part, index) =>
         index % 2 === 1 ? (
-          <mark key={index} className="rounded-sm bg-warn/40 px-0.5 text-inherit">
+          <mark key={index} className="rounded-sm bg-amber-400/35 px-0.5 text-white">
             {part}
           </mark>
         ) : (
@@ -1649,11 +1682,11 @@ function LogLine({ line, needle }: { line: string; needle: string }) {
 }
 
 const logTone = (line: string): string => {
-  if (line.startsWith("[x]")) return "text-danger";
-  if (line.startsWith("[ok]")) return "text-ok";
-  if (line.startsWith("[!]")) return "text-warn";
-  if (line.startsWith("[*]")) return "text-brand";
-  return "text-white/75";
+  if (line.startsWith("[x]")) return "text-rose-400";
+  if (line.startsWith("[ok]")) return "text-emerald-400";
+  if (line.startsWith("[!]")) return "text-amber-300";
+  if (line.startsWith("[*]")) return "text-violet-400";
+  return "text-zinc-200";
 };
 
 /** Splits a line so every occurrence of the needle can be highlighted. */
@@ -1752,16 +1785,16 @@ function DomainLinks({
         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute left-0 z-40 mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-line/70 bg-base py-1 shadow-lg">
+        <div className="absolute left-0 z-40 mt-1.5 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line/80 bg-base py-1 shadow-[var(--shadow-dropdown)]">
           {ordered.map((link) => (
             <a
               key={`${link.host}${link.path}`}
               href={external(link)}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-2 px-3 py-2 font-mono text-[11.5px] text-brand transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+              className="flex items-center gap-2 px-3 py-2 font-mono text-[11.5px] text-brand transition-colors hover:bg-recessed"
             >
-              <Globe className="h-3.5 w-3.5 shrink-0 text-black/35 dark:text-white/30" />
+              <Globe className="h-3.5 w-3.5 shrink-0 text-faint" />
               <span className="truncate">{external(link)}</span>
             </a>
           ))}
@@ -1774,9 +1807,9 @@ function DomainLinks({
                   setOpen(false);
                   onManage();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-recessed"
               >
-                <Settings className="h-3.5 w-3.5" />
+                <Settings className="h-3.5 w-3.5 text-muted" />
                 Manage domains
               </button>
             </>
@@ -1816,7 +1849,7 @@ function ActionsMenu({
   }, [open]);
 
   const item =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-black/[0.04] disabled:opacity-50 dark:hover:bg-white/[0.05]";
+    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-recessed disabled:opacity-50";
   const run = (action: () => void) => () => {
     setOpen(false);
     action();
@@ -1829,7 +1862,7 @@ function ActionsMenu({
         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </Button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-md border border-line/70 bg-base py-1 shadow-lg">
+        <div className="absolute right-0 z-40 mt-1.5 w-56 overflow-hidden rounded-xl border border-line/80 bg-base py-1 shadow-[var(--shadow-dropdown)]">
           <button className={item} onClick={run(onRedeploy)} disabled={deployPending || busy}>
             <Play className="h-3.5 w-3.5" />
             Redeploy
@@ -1921,16 +1954,16 @@ function RuntimeLogs({ applicationId, running }: { applicationId: string; runnin
   };
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle>Runtime logs</CardTitle>
-        {!running && <span className="text-[11px] text-warn">container is not running</span>}
+        {!running && <span className="text-[11px] font-medium text-warn">container is not running</span>}
       </CardHeader>
       <CardContent className="p-0">
         <TableToolbar
           left={
             <div className="relative max-w-sm">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -1942,11 +1975,11 @@ function RuntimeLogs({ applicationId, running }: { applicationId: string; runnin
           right={
             <>
               {needle && (
-                <span className="text-[11px] text-black/45 dark:text-white/40">
+                <span className="text-[11px] text-muted">
                   {matches === 1 ? "1 match" : `${matches} matches`}
                 </span>
               )}
-              <label className="flex items-center gap-1.5 text-[11px] text-black/55 dark:text-white/50">
+              <label className="flex items-center gap-1.5 text-[11px] text-muted">
                 <input
                   type="checkbox"
                   checked={follow}
@@ -1954,16 +1987,16 @@ function RuntimeLogs({ applicationId, running }: { applicationId: string; runnin
                 />
                 Stream live
               </label>
-              <select
+              <Select
                 value={tail}
                 onChange={(event) => setTail(event.target.value)}
-                className="h-7 rounded-md bg-recessed px-1.5 text-[11px] ring-1 ring-line/70 outline-none focus:ring-2 focus:ring-brand"
+                className="w-28"
               >
                 <option value="100">100 lines</option>
                 <option value="500">500 lines</option>
                 <option value="2000">2000 lines</option>
                 <option value="all">All</option>
-              </select>
+              </Select>
               <Button
                 variant="ghost"
                 size="icon"
@@ -1984,10 +2017,10 @@ function RuntimeLogs({ applicationId, running }: { applicationId: string; runnin
             </>
           }
         />
-        <pre className="max-h-[26rem] overflow-auto rounded-b-[8px] bg-black/40 p-3 font-mono text-[11px] leading-relaxed">
-          {error !== "" && <div className="text-danger">{error}</div>}
+        <pre className="max-h-[26rem] overflow-auto rounded-b-xl bg-[#0f1117] p-3.5 font-mono text-[11px] leading-relaxed text-zinc-200">
+          {error !== "" && <div className="text-rose-400">{error}</div>}
           {lines.length === 0 && error === "" && (
-            <div className="text-white/40">
+            <div className="text-zinc-400">
               {running
                 ? follow
                   ? "Streaming — output appears as the application writes it."
@@ -2038,13 +2071,20 @@ function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar
           >
             {vars.map((variable) => (
               <Tr key={variable.id}>
-                <Td className="font-mono text-[12px]">{variable.key}</Td>
-                <Td>{variable.isSecret ? "yes" : "no"}</Td>
-                <Td className="text-black/55 dark:text-white/45">
+                <Td className="font-mono text-[12px] text-ink">{variable.key}</Td>
+                <Td className="text-muted">{variable.isSecret ? "yes" : "no"}</Td>
+                <Td className="text-muted">
                   {variable.isBuild ? "build" : "runtime"}
                 </Td>
               </Tr>
             ))}
+            {vars.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-4 py-8 text-center text-[12px] text-muted">
+                  No environment variables configured yet.
+                </td>
+              </tr>
+            )}
           </Table>
         </CardContent>
       </Card>
@@ -2055,24 +2095,26 @@ function EnvPanel({ applicationId, vars }: { applicationId: string; vars: EnvVar
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="mb-1 block text-[11px] text-black/60 dark:text-white/55">Key</label>
-            <input
+            <Label htmlFor="env-key">Key</Label>
+            <Input
+              id="env-key"
               value={key}
               onChange={(event) => setKey(event.target.value)}
               placeholder="DATABASE_URL"
-              className="h-8 w-full rounded-md bg-recessed px-2.5 font-mono text-[12px] ring-1 ring-line/70 outline-none focus:ring-2 focus:ring-brand"
+              className="font-mono text-[12px]"
             />
           </div>
           <div>
-            <label className="mb-1 block text-[11px] text-black/60 dark:text-white/55">Value</label>
-            <input
+            <Label htmlFor="env-value">Value</Label>
+            <Input
+              id="env-value"
               value={value}
               onChange={(event) => setValue(event.target.value)}
               type={isSecret ? "password" : "text"}
-              className="h-8 w-full rounded-md bg-recessed px-2.5 font-mono text-[12px] ring-1 ring-line/70 outline-none focus:ring-2 focus:ring-brand"
+              className="font-mono text-[12px]"
             />
           </div>
-          <label className="flex items-center gap-2 text-[12px]">
+          <label className="flex items-center gap-2 text-[12px] text-ink">
             <input
               type="checkbox"
               checked={isSecret}
@@ -2200,9 +2242,9 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
                 value={port}
                 onChange={(event) => setPort(event.target.value)}
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 The port the application listens on inside the container; the proxy routes to it.
-                Meghify passes this as <code>PORT</code> unless the app already defines it.
+                Meghify passes this as <code className="font-mono text-ink">PORT</code> unless the app already defines it.
                 Containers have isolated networks, so different apps can both use 3000.
               </p>
             </div>
@@ -2214,7 +2256,7 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
                 onChange={(event) => setMappings(event.target.value)}
                 placeholder="8085:3000"
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Publish container ports on the host: hostPort:containerPort, comma separated.
               </p>
             </div>
@@ -2224,7 +2266,7 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
             <Row label="Docker network" value={networkName(app)} />
             <Row label="Network alias" value={containerName(app)} />
           </div>
-          <div className="flex justify-end border-t border-line/40 pt-3">
+          <div className="flex justify-end border-t border-line/50 pt-3">
             <Button variant="primary" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
               Save changes
             </Button>
@@ -2235,15 +2277,15 @@ function NetworkingCard({ app, applicationId }: { app: Application; applicationI
       <Card>
         <CardHeader>
           <CardTitle>Proxy routing</CardTitle>
-          <span className="text-[11px] text-black/40 dark:text-white/35">
+          <span className="text-[11px] text-faint">
             the config Traefik serves now — domain edits apply instantly
           </span>
         </CardHeader>
         <CardContent>
           {labels.isLoading ? (
-            <p className="text-[12px] text-black/45 dark:text-white/40">Loading routing…</p>
+            <p className="text-[12px] text-muted">Loading routing…</p>
           ) : (
-            <pre className="max-h-72 overflow-auto rounded-md bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-white/75">
+            <pre className="max-h-72 overflow-auto rounded-lg border border-line/70 bg-[#0f1117] p-3.5 font-mono text-[11px] leading-relaxed text-zinc-200">
               {(labels.data ?? []).join("\n") || "no routing"}
             </pre>
           )}
@@ -2308,7 +2350,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                 onChange={(event) => setCpu(event.target.value)}
                 placeholder="unlimited"
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Fraction of one core, e.g. 1.5. Empty keeps the engine default.
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2317,7 +2359,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                     key={preset}
                     type="button"
                     onClick={() => setCpu(preset)}
-                    className="rounded-full border border-line/60 px-2 py-0.5 text-[10.5px] text-black/50 transition-colors hover:bg-black/[0.04] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.05]"
+                    className="rounded-full border border-line/70 bg-recessed/70 px-2.5 py-0.5 text-[10.5px] font-medium text-muted transition-colors hover:bg-subtle hover:text-ink"
                   >
                     {preset} core{preset === "1" ? "" : "s"}
                   </button>
@@ -2332,7 +2374,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                 onChange={(event) => setMemory(event.target.value)}
                 placeholder="512m · 2g · bytes"
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Accepts 512m, 2g or a plain byte count. Empty keeps the engine default.
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2341,7 +2383,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                     key={preset}
                     type="button"
                     onClick={() => setMemory(preset)}
-                    className="rounded-full border border-line/60 px-2 py-0.5 text-[10.5px] text-black/50 transition-colors hover:bg-black/[0.04] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.05]"
+                    className="rounded-full border border-line/70 bg-recessed/70 px-2.5 py-0.5 text-[10.5px] font-medium text-muted transition-colors hover:bg-subtle hover:text-ink"
                   >
                     {preset}
                   </button>
@@ -2350,7 +2392,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
             </div>
           </div>
 
-          <p className="rounded-md bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-black/45 dark:text-white/40">
+          <p className="rounded-lg border border-line/60 bg-recessed/55 px-3 py-2 text-[11px] leading-relaxed text-muted">
             Saved limits are pushed to the running container immediately when the engine is reachable. They also apply to every future deployment.
           </p>
 
@@ -2364,7 +2406,7 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                 onChange={(event) => setPre(event.target.value)}
                 placeholder="php artisan down"
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Runs in the previous container before the swap; a failure aborts the deployment.
               </p>
             </div>
@@ -2377,14 +2419,14 @@ function RuntimeCard({ app, applicationId }: { app: Application; applicationId: 
                 onChange={(event) => setPost(event.target.value)}
                 placeholder="php artisan migrate --force"
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Runs in the new container once it is live; a failure marks the deployment failed.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/40 pt-3">
-            <p className="text-[10.5px] text-black/40 dark:text-white/35">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/50 pt-3">
+            <p className="text-[10.5px] text-faint">
               Applying limits also clears a temporary resource-guard CPU throttle.
             </p>
             <div className="flex items-center gap-2">
@@ -2425,7 +2467,7 @@ function DangerCard({ app, applicationId }: { app: Application; applicationId: s
                 Permanent
               </span>
             </div>
-            <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+            <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted">
               Permanently delete {app.name}, stop its containers, and remove the selected Docker
               resources and configuration. Active deployments stop, and the application cannot be
               restored.
@@ -2576,16 +2618,16 @@ function DeleteApplicationDialog({
           </div>
 
           <div>
-            <div className="text-[12px] font-semibold">Confirm actions</div>
-            <p className="mt-0.5 text-[11px] text-black/50 dark:text-white/45">
+            <div className="text-[12px] font-semibold text-ink">Confirm actions</div>
+            <p className="mt-0.5 text-[11px] text-muted">
               Enter the resource name to confirm permanent deletion
             </p>
-            <div className="mt-1.5 flex items-center justify-between gap-3 rounded-md border border-line/60 bg-recessed px-3 py-2 font-mono text-[12px]">
+            <div className="mt-1.5 flex items-center justify-between gap-3 rounded-lg border border-line/70 bg-recessed px-3 py-2 font-mono text-[12px] text-ink">
               <span className="truncate">{app.name}</span>
               <button
                 type="button"
                 title="Copy the name"
-                className="shrink-0 text-black/45 transition-colors hover:text-current dark:text-white/40"
+                className="shrink-0 text-muted transition-colors hover:text-ink"
                 onClick={() => navigator.clipboard?.writeText(app.name)}
               >
                 <Copy className="h-3.5 w-3.5" />

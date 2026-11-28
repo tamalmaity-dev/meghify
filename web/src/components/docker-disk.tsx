@@ -4,25 +4,13 @@ import { HardDrive, RefreshCw, Trash2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
 import { api, formatBytes } from "@/lib/api";
+import { useTheme } from "@/lib/theme";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { DockerCleanupResult, DockerDiskUsage, DockerUsageItem } from "@/lib/types";
 
-/**
- * The Docker side of the disk the STORAGE tile counts: what the engine holds
- * in images, containers, volumes and build cache, what the build sandbox's
- * own daemon adds, and the objects that dominate each. `docker system df`
- * walks the stores for this and can spike CPU on a small node, so the server
- * caches a measurement for fifteen minutes; Refresh always forces a new scan.
- */
-
 const REFETCH_MS = 15 * 60_000;
-
-const IMAGES_COLOR = "#a78bfa";
-const CONTAINERS_COLOR = "#fbbf24";
-const VOLUMES_COLOR = "#34d399";
-const BUILD_CACHE_COLOR = "#38bdf8";
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -33,6 +21,14 @@ const kindLabel: Record<DockerUsageItem["kind"], string> = {
 };
 
 export function DockerDiskUsage() {
+  const { resolvedTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
+
+  const imagesColor = isLight ? "#7c3aed" : "#a78bfa";
+  const containersColor = isLight ? "#d97706" : "#fbbf24";
+  const volumesColor = isLight ? "#059669" : "#34d399";
+  const buildCacheColor = isLight ? "#0284c7" : "#38bdf8";
+
   const queryClient = useQueryClient();
   const forceNext = useRef(false);
   const usage = useQuery({
@@ -73,12 +69,12 @@ export function DockerDiskUsage() {
 
   if (usage.isError) {
     return (
-      <section className="mb-4">
+      <section className="mb-5">
         <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-[13px] font-semibold tracking-tight">Docker storage</h2>
+          <h2 className="text-[13px] font-semibold tracking-tight text-ink">Docker storage</h2>
         </div>
         <Card>
-          <CardContent className="py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+          <CardContent className="py-6 text-center text-[12px] text-muted">
             Docker disk usage is unavailable right now — {errorText(usage.error)}
           </CardContent>
         </Card>
@@ -88,38 +84,38 @@ export function DockerDiskUsage() {
 
   const slices = engine
     ? [
-        { name: "Images", value: engine.images, color: IMAGES_COLOR },
-        { name: "Build cache", value: engine.buildCache, color: BUILD_CACHE_COLOR },
-        { name: "Volumes", value: engine.volumes, color: VOLUMES_COLOR },
-        { name: "Containers", value: engine.containers, color: CONTAINERS_COLOR },
+        { name: "Images", value: engine.images, color: imagesColor },
+        { name: "Build cache", value: engine.buildCache, color: buildCacheColor },
+        { name: "Volumes", value: engine.volumes, color: volumesColor },
+        { name: "Containers", value: engine.containers, color: containersColor },
       ].filter((slice) => slice.value > 0)
     : [];
   const empty = slices.length === 0;
 
   return (
-    <section className="mb-4">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-[13px] font-semibold tracking-tight">Docker storage</h2>
-        <span className="text-[11px] text-black/40 dark:text-white/35">
+    <section className="mb-5">
+      <div className="mb-2.5 flex items-baseline justify-between">
+        <h2 className="text-[13px] font-semibold tracking-tight text-ink">Docker storage</h2>
+        <span className="text-[11px] text-faint">
           {sampledAt ? `measured ${sampledAt} · ` : ""}refreshes every 15 min
         </span>
       </div>
 
       <Card>
-        <CardHeader className="pb-1">
+        <CardHeader>
           <CardTitle>
             <span className="inline-flex items-center gap-2">
-              <HardDrive className="h-4 w-4" />
+              <HardDrive className="h-4 w-4 text-muted" />
               Docker disk usage
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-1">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="flex items-center gap-4">
-              <div className="relative h-[168px] w-[168px] shrink-0">
+        <CardContent className="pt-4">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="relative h-[168px] w-[168px] shrink-0 self-center">
                 {usage.isLoading || empty ? (
-                  <div className="flex h-full items-center justify-center text-[12px] text-black/40 dark:text-white/35">
+                  <div className="flex h-full items-center justify-center rounded-full border border-dashed border-line text-[12px] text-faint">
                     {usage.isLoading ? "Measuring…" : "Nothing stored yet"}
                   </div>
                 ) : (
@@ -144,10 +140,10 @@ export function DockerDiskUsage() {
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                      <div className="text-[15px] font-semibold tabular-nums">
+                      <div className="text-[15px] font-semibold tabular-nums text-ink">
                         {formatBytes(engine?.total)}
                       </div>
-                      <div className="text-[10px] uppercase tracking-wider text-black/40 dark:text-white/35">
+                      <div className="text-[10px] uppercase tracking-wider text-faint">
                         Docker usage
                       </div>
                     </div>
@@ -156,34 +152,41 @@ export function DockerDiskUsage() {
               </div>
 
               <div className="min-w-0 flex-1 space-y-1.5 text-[12px]">
-                {([["Images", IMAGES_COLOR], ["Build cache", BUILD_CACHE_COLOR], ["Volumes", VOLUMES_COLOR], ["Containers", CONTAINERS_COLOR]] as const).map(
-                  ([label, color]) => (
-                    <div key={label} className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-                        <span className="truncate text-black/60 dark:text-white/50">{label}</span>
-                      </span>
-                      <span className="shrink-0 tabular-nums text-black/55 dark:text-white/45">
-                        {formatBytes(
-                          label === "Images" ? engine?.images
-                          : label === "Build cache" ? engine?.buildCache
-                          : label === "Volumes" ? engine?.volumes
-                          : engine?.containers,
-                        )}
-                      </span>
-                    </div>
-                  ),
-                )}
+                {([
+                  ["Images", imagesColor],
+                  ["Build cache", buildCacheColor],
+                  ["Volumes", volumesColor],
+                  ["Containers", containersColor],
+                ] as const).map(([label, color]) => (
+                  <div key={label} className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+                      <span className="truncate text-muted">{label}</span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[11.5px] tabular-nums text-ink">
+                      {formatBytes(
+                        label === "Images"
+                          ? engine?.images
+                          : label === "Build cache"
+                            ? engine?.buildCache
+                            : label === "Volumes"
+                              ? engine?.volumes
+                              : engine?.containers,
+                      )}
+                    </span>
+                  </div>
+                ))}
                 {sandbox && (
-                  <p className="pt-1 text-[11px] text-black/40 dark:text-white/35">
+                  <p className="pt-1 text-[11px] text-faint">
                     Build sandbox stores{" "}
-                    <span className="tabular-nums">{formatBytes(sandbox.total)}</span> of that —
-                    images {formatBytes(sandbox.images)}, cache {formatBytes(sandbox.buildCache)}
+                    <span className="tabular-nums text-muted">{formatBytes(sandbox.total)}</span> of
+                    that — images {formatBytes(sandbox.images)}, cache{" "}
+                    {formatBytes(sandbox.buildCache)}
                   </p>
                 )}
-                <div className="flex gap-2 pt-2">
+                <div className="flex flex-wrap gap-2 pt-2">
                   <Button
-                    variant="ghost"
+                    variant="neutral"
                     size="sm"
                     disabled={usage.isFetching}
                     onClick={() => void refresh()}
@@ -201,7 +204,7 @@ export function DockerDiskUsage() {
                     {cleanup.isPending ? "Cleaning up…" : "Free up space"}
                   </Button>
                 </div>
-                <p className="pt-1 text-[11px] leading-relaxed text-black/40 dark:text-white/35">
+                <p className="pt-1 text-[11px] leading-relaxed text-faint">
                   Old panel-built images, superseded proxy versions and retired helpers are pruned
                   automatically after releases, at startup and by the hourly GC.
                 </p>
@@ -209,17 +212,20 @@ export function DockerDiskUsage() {
             </div>
 
             <div>
-              <p className="mb-2 text-[11px] uppercase tracking-wider text-black/40 dark:text-white/35">
+              <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-faint">
                 Largest items
               </p>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {top.length === 0 && (
-                  <p className="text-[12px] text-black/40 dark:text-white/35">
-                    Nothing measured yet.
-                  </p>
+                  <p className="text-[12px] text-faint">Nothing measured yet.</p>
                 )}
                 {top.map((item) => (
-                  <TopRow key={`${item.kind}:${item.name}`} item={item} total={engine?.total ?? 0} />
+                  <TopRow
+                    key={`${item.kind}:${item.name}`}
+                    item={item}
+                    total={engine?.total ?? 0}
+                    colors={{ imagesColor, volumesColor, containersColor }}
+                  />
                 ))}
               </div>
             </div>
@@ -230,26 +236,40 @@ export function DockerDiskUsage() {
   );
 }
 
-function TopRow({ item, total }: { item: DockerUsageItem; total: number }) {
+function TopRow({
+  item,
+  total,
+  colors,
+}: {
+  item: DockerUsageItem;
+  total: number;
+  colors: { imagesColor: string; volumesColor: string; containersColor: string };
+}) {
   const width = total > 0 ? Math.max(2, Math.round((item.bytes / total) * 100)) : 0;
   return (
     <div className="text-[12px]">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate font-mono text-[11.5px] text-black/70 dark:text-white/55" title={item.name}>
+        <span className="truncate font-mono text-[11.5px] text-ink" title={item.name}>
           {item.name}
         </span>
-        <span className="shrink-0 text-black/45 dark:text-white/40">
+        <span className="shrink-0 text-muted">
           <span className="tabular-nums">{formatBytes(item.bytes)}</span>
-          <span className="ml-1.5 text-[10.5px] uppercase tracking-wide">{kindLabel[item.kind]}</span>
+          <span className="ml-1.5 text-[10px] uppercase tracking-wide text-faint">
+            {kindLabel[item.kind]}
+          </span>
         </span>
       </div>
-      <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-white/[0.07] dark:bg-white/[0.06]">
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-subtle">
         <div
-          className="h-full rounded-full opacity-70 transition-[width] duration-500"
+          className="h-full rounded-full opacity-80 transition-[width] duration-500"
           style={{
             width: `${width}%`,
             background:
-              item.kind === "volume" ? VOLUMES_COLOR : item.kind === "image" ? IMAGES_COLOR : CONTAINERS_COLOR,
+              item.kind === "volume"
+                ? colors.volumesColor
+                : item.kind === "image"
+                  ? colors.imagesColor
+                  : colors.containersColor,
           }}
         />
       </div>

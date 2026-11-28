@@ -103,7 +103,7 @@ export function TerminalPage() {
         <button
           type="button"
           onClick={() => setSelected(null)}
-          className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+          className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
           All terminal targets
@@ -112,8 +112,8 @@ export function TerminalPage() {
           title={selected.kind === "server" ? "Server terminal" : "Container terminal"}
           description={subtitle}
           actions={
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-1 text-[11px] text-black/55 dark:text-white/45">
-              <TerminalSquare className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-line/60 bg-base px-2.5 py-1 text-[11px] text-muted">
+              <TerminalSquare className="h-3.5 w-3.5 text-brand" />
               {selected.kind === "server" ? "ssh / helper shell" : "interactive exec"}
             </span>
           }
@@ -162,9 +162,9 @@ export function TerminalPage() {
         }
       />
 
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2.5">
         <div className="relative max-w-sm flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -172,7 +172,7 @@ export function TerminalPage() {
             className="pl-8"
           />
         </div>
-        <span className="text-[11px] text-black/40 dark:text-white/35">
+        <span className="text-[11px] text-faint">
           {filtered.servers.length} server{filtered.servers.length === 1 ? "" : "s"} ·{" "}
           {filtered.containers.length} running container
           {filtered.containers.length === 1 ? "" : "s"}
@@ -191,41 +191,41 @@ export function TerminalPage() {
         <Card>
           <CardHeader>
             <CardTitle>Servers</CardTitle>
-            <span className="text-[10.5px] text-black/40 dark:text-white/35">
+            <span className="text-[10.5px] text-faint">
               SSH shell or the local Docker helper
             </span>
           </CardHeader>
           <CardContent className="p-0">
             {targets.isLoading ? (
-              <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-                Discovering servers…
-              </p>
+              <p className="px-4 py-6 text-center text-[12px] text-muted">Discovering servers…</p>
             ) : !filtered.servers.length ? (
-              <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+              <p className="px-4 py-6 text-center text-[12px] text-muted">
                 No servers match this filter.
               </p>
             ) : (
-              <ul className="divide-y divide-line/40">
+              <ul className="divide-y divide-line/45">
                 {filtered.servers.map(({ node, containers, error }) => (
                   <li key={node.id}>
                     <button
                       type="button"
                       onClick={() => setSelected({ kind: "server", node })}
-                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-black/[0.025] dark:hover:bg-white/[0.03]"
+                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-recessed/65"
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/[0.05] text-black/55 dark:bg-white/[0.06] dark:text-white/45">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-recessed text-muted">
                         <Server className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium">{node.name}</span>
+                          <span className="truncate text-[13px] font-medium text-ink">
+                            {node.name}
+                          </span>
                           {node.id === "local" && (
-                            <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-brand">
+                            <span className="rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-brand">
                               local
                             </span>
                           )}
                         </span>
-                        <span className="mt-0.5 block truncate text-[11px] text-black/45 dark:text-white/35">
+                        <span className="mt-0.5 block truncate text-[11px] text-muted">
                           {node.id === "local"
                             ? "This machine — shell with Docker CLI"
                             : `${node.sshUser}@${node.address}:${node.sshPort}`}
@@ -235,7 +235,7 @@ export function TerminalPage() {
                         </span>
                       </span>
                       <StatusBadge status={node.status} />
-                      <span className="hidden items-center gap-1 text-[11px] text-black/40 transition-colors group-hover:text-current dark:text-white/35 sm:flex">
+                      <span className="hidden items-center gap-1 text-[11px] text-faint transition-colors group-hover:text-ink sm:flex">
                         Open
                         <ArrowUpRight className="h-3.5 w-3.5" />
                       </span>
@@ -250,47 +250,45 @@ export function TerminalPage() {
         <Card>
           <CardHeader>
             <CardTitle>Containers</CardTitle>
-            <span className="text-[10.5px] text-black/40 dark:text-white/35">
+            <span className="text-[10.5px] text-faint">
               Running containers across every reachable server
             </span>
           </CardHeader>
           <CardContent className="p-0">
             {targets.isLoading ? (
-              <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
-                Discovering containers…
-              </p>
+              <p className="px-4 py-6 text-center text-[12px] text-muted">Discovering containers…</p>
             ) : !filtered.containers.length ? (
-              <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+              <p className="px-4 py-6 text-center text-[12px] text-muted">
                 No running containers match this filter.
               </p>
             ) : (
-              <ul className="divide-y divide-line/40">
+              <ul className="divide-y divide-line/45">
                 {filtered.containers.map(({ node, container }) => (
                   <li key={`${node.id}:${container.id}`}>
                     <button
                       type="button"
                       onClick={() => setSelected({ kind: "container", node, container })}
-                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-black/[0.025] dark:hover:bg-white/[0.03]"
+                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-recessed/65"
                     >
-                      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/[0.05] text-black/55 dark:bg-white/[0.06] dark:text-white/45">
+                      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-recessed text-muted">
                         <ContainerIcon className="h-4 w-4" />
-                        <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full border-2 border-base bg-ok" />
+                        <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-base bg-ok" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">
+                        <span className="block truncate text-[13px] font-medium text-ink">
                           {container.name}
                         </span>
-                        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-black/45 dark:text-white/35">
-                          <Box className="h-3 w-3 shrink-0" />
+                        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
+                          <Box className="h-3 w-3 shrink-0 text-faint" />
                           <span className="truncate font-mono">{container.image}</span>
                         </span>
                       </span>
-                      <span className="hidden shrink-0 rounded-full bg-white/[0.04] px-2 py-0.5 text-[10px] text-black/45 dark:text-white/35 sm:inline">
+                      <span className="hidden shrink-0 rounded-full border border-line/60 bg-subtle/70 px-2 py-0.5 text-[10px] text-muted sm:inline">
                         {node.name}
                       </span>
                       <span
                         className={cn(
-                          "hidden items-center gap-1 text-[11px] text-black/40 transition-colors group-hover:text-current dark:text-white/35 sm:flex",
+                          "hidden items-center gap-1 text-[11px] text-faint transition-colors group-hover:text-ink sm:flex",
                         )}
                       >
                         Open

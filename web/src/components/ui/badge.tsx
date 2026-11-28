@@ -5,22 +5,22 @@ import { toneFor } from "@/lib/types";
 type Tone = "ok" | "warn" | "danger" | "neutral";
 
 const toneClasses: Record<Tone, string> = {
-  ok: "text-ok",
-  warn: "text-warn",
-  danger: "text-danger",
-  neutral: "text-black/60 dark:text-white/50",
+  ok: "bg-ok/12 text-ok border-ok/25",
+  warn: "bg-warn/12 text-warn border-warn/25",
+  danger: "bg-danger/12 text-danger border-danger/25",
+  neutral: "bg-subtle/75 text-muted border-line/70",
 };
 
 const dotClasses: Record<Tone, string> = {
   ok: "bg-ok",
   warn: "bg-warn",
   danger: "bg-danger",
-  neutral: "bg-black/30 dark:bg-white/30",
+  neutral: "bg-faint",
 };
 
 /**
- * Resource status is shown as a small neutral pill with a semantic dot, never a
- * full coloured rectangle. That keeps dozens of rows readable at once.
+ * Resource status pill with a semantic dot and balanced contrast across light
+ * and dark themes.
  */
 export function StatusBadge({
   status,
@@ -33,7 +33,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
         toneClasses[tone],
         className,
       )}
@@ -54,8 +54,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full bg-white/[0.05] px-2 py-0.5 text-[11px] font-medium",
-        "text-black/65 dark:text-white/60",
+        "inline-flex items-center rounded-full border border-line/60 bg-subtle/70 px-2 py-0.5 text-[11px] font-medium text-muted",
         className,
       )}
     >
@@ -77,10 +76,14 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      {icon && <div className="text-black/30 dark:text-white/25">{icon}</div>}
-      <div className="text-[13px] font-medium">{title}</div>
+      {icon && (
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-line/60 bg-recessed text-muted">
+          {icon}
+        </div>
+      )}
+      <div className="text-[13.5px] font-semibold text-ink">{title}</div>
       {description && (
-        <p className="max-w-sm text-[12px] text-black/50 dark:text-white/45">{description}</p>
+        <p className="max-w-sm text-[12px] leading-relaxed text-muted">{description}</p>
       )}
       {action && <div className="mt-2">{action}</div>}
     </div>

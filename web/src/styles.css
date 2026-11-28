@@ -1,70 +1,107 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
- * The panel mirrors Coolify's surface ladder: a neutral canvas, three distinct
- * panel layers, and one restrained accent per theme. Light mode uses a purple
- * accent, dark mode uses amber, because the purple fails contrast on dark.
+ * Semantic surface & color ladder for Meghify.
+ * Light and dark palettes live on :root.light / :root.dark and are mapped into
+ * Tailwind utilities via @theme inline so every bg-*, text-*, border-*, and
+ * ring-* utility switches immediately without OS media-query mismatches.
  */
-@theme {
-  --color-app: oklch(14.48% 0 0);
-  --color-app-light: oklch(97% 0 0);
+:root,
+:root.dark {
+  color-scheme: dark;
+  --app: oklch(13.8% 0.008 265);
+  --surface: oklch(17.2% 0.009 265);
+  --base: oklch(20.6% 0.01 265);
+  --recessed: oklch(15.6% 0.008 265);
+  --subtle: oklch(26.2% 0.011 265);
+  --line: oklch(30% 0.013 265);
 
-  --color-surface: oklch(19.13% 0 0);
-  --color-surface-light: oklch(100% 0 0);
+  --ink: oklch(95.5% 0.004 265);
+  --muted: oklch(71% 0.012 265);
+  --faint: oklch(54% 0.01 265);
 
-  --color-base: oklch(22.64% 0 0);
-  --color-base-light: oklch(100% 0 0);
+  --brand: oklch(73.5% 0.175 292);
+  --brand-solid: oklch(56% 0.23 288);
+  --ok: oklch(74% 0.175 154);
+  --warn: oklch(80% 0.155 82);
+  --danger: oklch(68% 0.21 24);
 
-  --color-recessed: oklch(25.2% 0 0);
-  --color-recessed-light: oklch(96.1% 0 0);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.26), inset 0 1px 0 rgb(255 255 255 / 0.03);
+  --shadow-dropdown: 0 10px 28px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.25);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 0.55);
+}
 
-  --color-line: oklch(32% 0 0);
-  --color-line-light: oklch(90.1% 0 0);
+:root.light {
+  color-scheme: light;
+  --app: oklch(97.2% 0.004 260);
+  --surface: oklch(100% 0 0);
+  --base: oklch(100% 0 0);
+  --recessed: oklch(95.8% 0.005 260);
+  --subtle: oklch(93% 0.006 260);
+  --line: oklch(88.5% 0.008 260);
 
-  --color-brand: oklch(55.5% 0.235 304);
-  --color-brand-light: oklch(48% 0.24 304);
-  --color-brand-dark: oklch(80% 0.17 85);
+  --ink: oklch(19% 0.012 260);
+  --muted: oklch(45% 0.012 260);
+  --faint: oklch(58% 0.009 260);
 
-  --color-ok: oklch(72% 0.19 152);
-  --color-warn: oklch(79% 0.15 85);
-  --color-danger: oklch(63% 0.23 25);
+  --brand: oklch(52% 0.24 288);
+  --brand-solid: oklch(52% 0.24 288);
+  --ok: oklch(53% 0.175 154);
+  --warn: oklch(62% 0.165 72);
+  --danger: oklch(55% 0.22 25);
 
-  --radius-card: 0.5rem;
-  --shadow-dropdown: 0 4px 12px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.08);
-  --shadow-modal: 0 18px 50px rgb(0 0 0 / 0.28);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+  --shadow-dropdown: 0 10px 28px rgb(15 23 42 / 0.12), 0 2px 6px rgb(15 23 42 / 0.06);
+  --shadow-modal: 0 24px 60px rgb(15 23 42 / 0.18);
+}
+
+@theme inline {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-base: var(--base);
+  --color-recessed: var(--recessed);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-brand: var(--brand);
+  --color-brand-solid: var(--brand-solid);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  --radius-card: 0.75rem;
+  --shadow-card: var(--shadow-card);
+  --shadow-dropdown: var(--shadow-dropdown);
+  --shadow-modal: var(--shadow-modal);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
 }
 
 @layer base {
-  :root {
-    color-scheme: dark;
-    background-color: var(--color-app);
-    color: oklch(96% 0 0);
-  }
-
-  :root.light {
-    color-scheme: light;
-    background-color: var(--color-app-light);
-    color: oklch(20% 0 0);
+  html {
+    background-color: var(--app);
+    color: var(--ink);
   }
 
   * {
-    border-color: var(--color-line);
+    border-color: var(--line);
   }
 
-  html.dark ::selection,
   ::selection {
-    background: color-mix(in oklch, var(--color-brand) 35%, transparent);
-  }
-
-  html:not(.dark) ::selection {
-    background: color-mix(in oklch, var(--color-brand-light) 30%, transparent);
+    background: color-mix(in oklch, var(--brand) 28%, transparent);
   }
 
   body {
     margin: 0;
+    background-color: var(--app);
+    color: var(--ink);
     font-family: var(--font-sans);
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
@@ -73,56 +110,52 @@
 
   /* Compact UI typography: the panel is a dense operator surface, not a
      marketing page. */
-  h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-  h2 { font-size: 18px; font-weight: 600; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
+  h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
   h3 { font-size: 15px; font-weight: 600; }
 
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--brand);
     outline-offset: 2px;
   }
 
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: color-mix(in oklch, currentColor 18%, transparent);
+    background: color-mix(in oklch, var(--ink) 16%, transparent);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in oklch, currentColor 30%, transparent);
+    background: color-mix(in oklch, var(--ink) 28%, transparent);
     background-clip: content-box;
   }
 }
 
 @layer utilities {
-  .surface { background: var(--color-surface); }
-  .surface-light { background: var(--color-surface-light); }
-  .base { background: var(--color-base); }
-  .recessed { background: var(--color-recessed); }
-
-  html.dark .surface { background: var(--color-surface); }
-  html:not(.dark) .surface { background: var(--color-surface-light); }
-
-  html.dark .base { background: var(--color-base); }
-  html:not(.dark) .base { background: var(--color-base-light); }
-
-  html.dark .recessed { background: var(--color-recessed); }
-  html:not(.dark) .recessed { background: var(--color-recessed-light); }
-
-  .accent { color: var(--color-brand); }
-  html:not(.dark) .accent { color: var(--color-brand-light); }
-  html.dark .accent { color: var(--color-brand-dark); }
+  .surface { background-color: var(--surface); }
+  .base { background-color: var(--base); }
+  .recessed { background-color: var(--recessed); }
+  .accent { color: var(--brand); }
 
   .card-lift {
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-line) 80%, transparent),
-      0 1px 2px rgb(0 0 0 / 0.05);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Theme-aware chevron for native <select> elements using mask-image so color always matches --muted. */
+  .select-chevron {
+    position: relative;
+  }
+  .select-chevron-icon {
+    background-color: var(--muted);
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>") center / 14px no-repeat;
+    mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>") center / 14px no-repeat;
   }
 }
 
 /* xterm needs a real height from a positioned ancestor. */
 .xterm {
   height: 100%;
-  padding: 8px;
+  padding: 10px;
 }

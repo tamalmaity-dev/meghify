@@ -29,14 +29,6 @@ interface ApplyResponse {
   message: string;
 }
 
-/**
- * Shows whether a newer release exists and, for admins on a systemd install,
- * starts `meghify update` in a transient unit. The panel restarts under the new
- * binary; the card polls /api/version and reloads once the version changes.
- *
- * The server checks GitHub and caches the answer for an hour, so this card is
- * cheap to keep on the Settings page.
- */
 export function UpdateCard({
   currentVersion,
   canUpdate = false,
@@ -69,8 +61,6 @@ export function UpdateCard({
         toast.error(error.message);
         return;
       }
-      // The panel can restart before the response reaches the browser. Treat a
-      // transport failure as "update likely started" and let polling decide.
       setConfirming(false);
       setUpdatingTo(update.data?.latest ?? "the new release");
     },
@@ -117,7 +107,7 @@ export function UpdateCard({
         <div className="flex items-center gap-2">
           <CardTitle>Updates</CardTitle>
           {available && !updatingTo && (
-            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-medium text-brand">
+            <span className="rounded-full border border-brand/25 bg-brand/12 px-2 py-0.5 text-[10px] font-medium text-brand">
               new release
             </span>
           )}
@@ -134,39 +124,39 @@ export function UpdateCard({
           />
         </Button>
       </CardHeader>
-      <CardContent className="space-y-2 text-[12px]">
+      <CardContent className="space-y-2.5 text-[12px]">
         <div className="flex items-baseline justify-between gap-4">
-          <span className="text-black/45 dark:text-white/40">Installed</span>
-          <span className="font-mono">{current || "dev"}</span>
+          <span className="text-muted">Installed</span>
+          <span className="font-mono text-ink">{current || "dev"}</span>
         </div>
 
         {status?.latest && (
           <div className="flex items-baseline justify-between gap-4">
-            <span className="text-black/45 dark:text-white/40">Latest release</span>
-            <span className={available ? "font-mono text-brand" : "font-mono"}>
+            <span className="text-muted">Latest release</span>
+            <span className={available ? "font-mono font-medium text-brand" : "font-mono text-ink"}>
               {status.latest}
             </span>
           </div>
         )}
 
         {available ? (
-          <div className="space-y-2 rounded-md bg-brand/5 px-3 py-2 text-[11px] leading-relaxed text-brand">
-            <p>
+          <div className="space-y-2 rounded-lg border border-brand/20 bg-brand/8 px-3 py-2.5 text-[11px] leading-relaxed text-ink">
+            <p className="font-medium text-brand">
               <ArrowUpCircle className="mr-1 inline h-3.5 w-3.5" />
               A newer release is available.
             </p>
 
             {updatingTo ? (
-              <p className="flex items-center gap-1.5">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              <p className="flex items-center gap-1.5 text-muted">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin text-brand" />
                 Updating to {updatingTo}… the panel restarts and this page reloads.
               </p>
             ) : canApply ? (
               confirming ? (
                 <div className="space-y-2">
-                  <p>
-                    Update to <span className="font-mono">{status.latest}</span> now? The panel
-                    restarts when the new binary is in place.
+                  <p className="text-muted">
+                    Update to <span className="font-mono text-ink">{status.latest}</span> now? The
+                    panel restarts when the new binary is in place.
                   </p>
                   <div className="flex gap-2">
                     <Button
@@ -193,7 +183,7 @@ export function UpdateCard({
                 </Button>
               )
             ) : (
-              <p>
+              <p className="text-muted">
                 {canUpdate
                   ? status.applyBlockedReason ?? "This install cannot update from the panel."
                   : "Ask an administrator to apply the update."}
@@ -201,7 +191,7 @@ export function UpdateCard({
             )}
 
             <div className="flex items-center gap-2">
-              <code className="rounded bg-black/20 px-2 py-1 font-mono text-[11px]">
+              <code className="rounded border border-line/70 bg-recessed px-2 py-1 font-mono text-[11px] text-ink">
                 meghify update
               </code>
               <Button
@@ -218,35 +208,33 @@ export function UpdateCard({
                 href={status.releaseUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 hover:underline"
+                className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
               >
                 Release notes <ExternalLink className="h-3 w-3" />
               </a>
             )}
           </div>
         ) : status?.error ? (
-          <p className="text-[11px] text-black/45 dark:text-white/40">
-            Could not check for updates: {status.error}
-          </p>
+          <p className="text-[11px] text-muted">Could not check for updates: {status.error}</p>
         ) : update.isLoading ? (
-          <p className="text-[11px] text-black/45 dark:text-white/40">Checking for updates…</p>
+          <p className="text-[11px] text-muted">Checking for updates…</p>
         ) : update.isError ? (
-          <p className="text-[11px] text-black/45 dark:text-white/40">
+          <p className="text-[11px] text-muted">
             Could not check for updates. Try again in a moment.
           </p>
         ) : dev ? (
-          <p className="text-[11px] text-black/45 dark:text-white/40">
+          <p className="text-[11px] text-muted">
             Development build — update checks are informational only.
           </p>
         ) : (
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-ok">
             <CheckCircle2 className="h-3.5 w-3.5" />
             You are on the latest release.
           </div>
         )}
 
         {status?.checkedAt && (
-          <p className="pt-1 text-[10px] text-black/35 dark:text-white/30">
+          <p className="pt-1 text-[10px] text-faint">
             Checked {new Date(status.checkedAt).toLocaleString()}
           </p>
         )}

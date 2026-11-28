@@ -77,7 +77,7 @@ export function GitHubAppDialog({ open, onClose }: { open: boolean; onClose: () 
             placeholder="meghify-my-vps"
             autoFocus
           />
-          <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+          <p className="mt-1 text-[10.5px] text-faint">
             The app name must be unique on GitHub and cannot be longer than 34 characters.
           </p>
         </div>

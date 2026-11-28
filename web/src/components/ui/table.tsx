@@ -2,8 +2,8 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Dense collection table. 40px header, ~48px rows, subtle row hover, and a
- * footer that only appears when there is more than one page of content.
+ * Dense collection table. Clean header strip, comfortable row padding, subtle
+ * theme-aware row hover, and clean divider lines.
  */
 export function Table({
   head,
@@ -18,7 +18,7 @@ export function Table({
     <div className={cn("overflow-x-auto", className)}>
       <table className="w-full border-collapse text-[13px]">
         <thead>
-          <tr className="h-10 text-left text-[11px] font-medium text-black/55 dark:text-white/45">
+          <tr className="h-9 border-b border-line/60 bg-recessed/35 text-left text-[11px] font-medium uppercase tracking-wider text-muted">
             {head}
           </tr>
         </thead>
@@ -40,7 +40,7 @@ export function Th({
   return (
     <th
       className={cn(
-        "px-3 pb-2 font-medium",
+        "px-3.5 py-2 font-medium",
         align === "right" && "text-right",
         align === "center" && "text-center",
         className,
@@ -63,7 +63,7 @@ export function Td({
   return (
     <td
       className={cn(
-        "h-12 border-t border-line/40 px-3 align-middle",
+        "h-12 border-t border-line/45 px-3.5 align-middle",
         align === "right" && "text-right",
         align === "center" && "text-center",
         className,
@@ -87,7 +87,7 @@ export function Tr({
     <tr
       onClick={onClick}
       className={cn(
-        "border-t border-line/40 transition-colors hover:bg-white/[0.025]",
+        "border-t border-line/45 transition-colors hover:bg-recessed/55",
         onClick && "cursor-pointer",
         className,
       )}
@@ -97,10 +97,6 @@ export function Tr({
   );
 }
 
-/**
- * Rows become compact summary cards below 600px so a dense table never becomes a
- * horizontally scrolling mess on a phone.
- */
 export function TableToolbar({
   left,
   right,
@@ -109,7 +105,7 @@ export function TableToolbar({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-line/40 px-3 py-2">
+    <div className="flex flex-wrap items-center gap-2 border-b border-line/50 px-3.5 py-2.5">
       <div className="min-w-0 flex-1">{left}</div>
       <div className="flex shrink-0 items-center gap-2">{right}</div>
     </div>
@@ -118,7 +114,7 @@ export function TableToolbar({
 
 export function TableFooter({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-t border-line/40 px-3 py-2 text-[11px] text-black/50 dark:text-white/45">
+    <div className="flex items-center justify-between border-t border-line/50 px-3.5 py-2 text-[11px] text-muted">
       {children}
     </div>
   );

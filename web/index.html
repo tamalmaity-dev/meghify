@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -10,6 +10,26 @@
       name="description"
       content="A lightweight self-hosted PaaS. Deploy applications and databases on your own hardware."
     />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("meghify-theme");
+          var mode = stored === "light" || stored === "dark" || stored === "system" ? stored : "dark";
+          var resolved =
+            mode === "system"
+              ? window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark"
+              : mode;
+          var root = document.documentElement;
+          root.classList.remove("dark", "light");
+          root.classList.add(resolved);
+          root.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

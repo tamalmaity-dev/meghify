@@ -439,7 +439,7 @@ export function ProjectDetailPage() {
         <>
           <Link
             to="/projects"
-            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
             All projects
@@ -477,17 +477,17 @@ export function ProjectDetailPage() {
           <Card className="mb-4">
             <CardHeader>
               <CardTitle>Applications</CardTitle>
-              <span className="text-[11px] text-black/40 dark:text-white/35">
+              <span className="text-[11px] text-faint">
                 {appList.length === 1 ? "1 application" : `${appList.length} applications`}
               </span>
             </CardHeader>
             <CardContent className={appList.length === 0 ? "p-0" : "p-3 pt-3"}>
               {appList.length === 0 ? (
-                <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+                <p className="px-4 py-6 text-center text-[12px] text-muted">
                   {isAdmin ? (
                     <>
                       No applications yet -{" "}
-                      <button className="text-brand hover:underline" onClick={() => setView("choose")}>
+                      <button className="font-medium text-brand hover:underline" onClick={() => setView("choose")}>
                         add a resource
                       </button>
                       .
@@ -497,28 +497,28 @@ export function ProjectDetailPage() {
                   )}
                 </p>
               ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2.5 sm:grid-cols-2">
                   {appList.map((app) => (
                     <Link
                       key={app.id}
                       to="/applications/$applicationId"
                       params={{ applicationId: app.id }}
-                      className="group flex items-center gap-3 rounded-[8px] border border-line/60 bg-base px-3.5 py-3 transition-colors hover:border-brand/40"
+                      className="group flex items-center gap-3 rounded-lg border border-line/70 bg-recessed/40 px-3.5 py-3 transition-colors hover:border-brand/50 hover:bg-recessed/80"
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand/15 text-[10px] font-semibold text-brand uppercase">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-[10px] font-semibold text-brand uppercase">
                         {initials(app.name)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium">{app.name}</span>
+                          <span className="truncate text-[13px] font-semibold text-ink">{app.name}</span>
                           <StatusBadge status={app.status} />
                         </span>
-                        <span className="mt-0.5 block truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                        <span className="mt-0.5 block truncate font-mono text-[11px] text-muted">
                           {app.gitRepository || "no repository"}
                           {app.gitBranch && app.buildPack !== "image" ? ` @ ${app.gitBranch}` : ""}
                         </span>
                       </span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-black/25 transition-transform group-hover:translate-x-0.5 dark:text-white/25" />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-ink" />
                     </Link>
                   ))}
                 </div>
@@ -529,17 +529,17 @@ export function ProjectDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Databases</CardTitle>
-              <span className="text-[11px] text-black/40 dark:text-white/35">
+              <span className="text-[11px] text-faint">
                 {dbList.length === 1 ? "1 database" : `${dbList.length} databases`}
               </span>
             </CardHeader>
             <CardContent className={dbList.length === 0 ? "p-0" : "p-3 pt-3"}>
               {dbList.length === 0 ? (
-                <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+                <p className="px-4 py-6 text-center text-[12px] text-muted">
                   {isAdmin ? (
                     <>
                       No databases yet -{" "}
-                      <button className="text-brand hover:underline" onClick={() => setView("choose")}>
+                      <button className="font-medium text-brand hover:underline" onClick={() => setView("choose")}>
                         add a resource
                       </button>
                       .
@@ -549,21 +549,21 @@ export function ProjectDetailPage() {
                   )}
                 </p>
               ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2.5 sm:grid-cols-2">
                   {dbList.map((db) => (
                     <div
                       key={db.id}
-                      className="flex items-center gap-3 rounded-[8px] border border-line/60 bg-base px-3.5 py-3"
+                      className="flex items-center gap-3 rounded-lg border border-line/70 bg-recessed/40 px-3.5 py-3"
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-ok/15 text-ok">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ok/12 text-ok">
                         <DatabaseIcon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium">{db.name}</span>
+                          <span className="truncate text-[13px] font-semibold text-ink">{db.name}</span>
                           <StatusBadge status={db.status} />
                         </span>
-                        <span className="mt-0.5 block truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                        <span className="mt-0.5 block truncate font-mono text-[11px] text-muted">
                           {db.kind} {db.version}
                           {db.publicPort ? ` · port ${db.publicPort}` : ""}
                         </span>
@@ -578,7 +578,7 @@ export function ProjectDetailPage() {
       ) : githubStep === "apps" ? (
         <>
           <button
-            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
             onClick={() => setGithubStep(null)}
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -611,7 +611,7 @@ export function ProjectDetailPage() {
 
           {githubApps.isLoading ? (
             <Card>
-              <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+              <CardContent className="py-8 text-center text-[12px] text-muted">
                 Loading GitHub Apps…
               </CardContent>
             </Card>
@@ -624,12 +624,12 @@ export function ProjectDetailPage() {
           ) : (githubApps.data ?? []).length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
-                  <Github className="h-5 w-5 opacity-70" />
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-line/60 bg-recessed text-muted">
+                  <Github className="h-5 w-5" />
                 </span>
                 <div>
-                  <div className="text-[13px] font-medium">No GitHub sources yet</div>
-                  <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-black/45 dark:text-white/40">
+                  <div className="text-[13.5px] font-semibold text-ink">No GitHub sources yet</div>
+                  <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-muted">
                     Create a GitHub App to deploy private repositories and redeploy automatically
                     when code is pushed. Meghify walks you through creating it on GitHub.
                   </p>
@@ -652,23 +652,23 @@ export function ProjectDetailPage() {
                   <Card key={app.id}>
                     <CardContent className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-recessed text-ink">
                           <Github className="h-4 w-4" />
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-[13px] font-medium">{app.name}</span>
+                            <span className="truncate text-[13px] font-semibold text-ink">{app.name}</span>
                             {app.configured ? (
-                              <span className="rounded-full bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok">
+                              <span className="rounded-full border border-ok/25 bg-ok/12 px-1.5 py-0.5 text-[10px] font-medium text-ok">
                                 App ID {app.appId}
                               </span>
                             ) : (
-                              <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                              <span className="rounded-full border border-warn/25 bg-warn/12 px-1.5 py-0.5 text-[10px] font-medium text-warn">
                                 Setup incomplete
                               </span>
                             )}
                           </div>
-                          <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
                             {app.configured && app.slug
                               ? `${displayHost(gitHubWebBase(app))}/apps/${app.slug}`
                               : "Register the app with GitHub to finish"}
@@ -693,17 +693,15 @@ export function ProjectDetailPage() {
                         </div>
                       </div>
 
-                      <div className="mt-2 border-t border-line/40 pt-2">
+                      <div className="mt-2.5 border-t border-line/50 pt-2.5">
                         {githubInstallations.isLoading ? (
-                          <p className="text-[11px] text-black/45 dark:text-white/40">
-                            Loading installations…
-                          </p>
+                          <p className="text-[11px] text-muted">Loading installations…</p>
                         ) : githubInstallations.isError ? (
                           <p className="text-[11px] text-danger">
                             {errorText(githubInstallations.error)}
                           </p>
                         ) : attached.length === 0 ? (
-                          <p className="text-[11px] text-black/50 dark:text-white/45">
+                          <p className="text-[11px] text-muted">
                             {app.configured
                               ? installUrl !== ""
                                 ? "Not installed on any account yet — press Install, grant access on GitHub, then Refresh."
@@ -715,21 +713,21 @@ export function ProjectDetailPage() {
                             {attached.map((installation) => (
                               <button
                                 key={installation.id}
-                                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                                className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-recessed"
                                 onClick={() => {
                                   setGithubInstallation(installation);
                                   setRepoSearch("");
                                   setGithubStep("repos");
                                 }}
                               >
-                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-[10px] font-semibold uppercase dark:bg-white/[0.08]">
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line/70 bg-recessed text-[10px] font-semibold uppercase text-ink">
                                   {installation.accountLogin.slice(0, 1)}
                                 </span>
                                 <span className="min-w-0 flex-1">
-                                  <span className="block truncate text-[12.5px] font-medium">
+                                  <span className="block truncate text-[12.5px] font-medium text-ink">
                                     {installation.accountLogin}
                                   </span>
-                                  <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
+                                  <span className="block truncate text-[11px] text-muted">
                                     {installation.accountType === "Organization"
                                       ? "Organization"
                                       : "User"}{" "}
@@ -739,10 +737,10 @@ export function ProjectDetailPage() {
                                       : "selected repositories"}
                                   </span>
                                 </span>
-                                <span className="hidden shrink-0 text-[11px] text-black/35 sm:block dark:text-white/30">
+                                <span className="hidden shrink-0 text-[11px] text-faint sm:block">
                                   Choose a repository
                                 </span>
-                                <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
+                                <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
                               </button>
                             ))}
                           </div>
@@ -758,7 +756,7 @@ export function ProjectDetailPage() {
       ) : githubStep === "repos" ? (
         <>
           <button
-            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
             onClick={() => setGithubStep("apps")}
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -774,7 +772,7 @@ export function ProjectDetailPage() {
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <div className="relative min-w-56 flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               <Input
                 value={repoSearch}
                 onChange={(event) => setRepoSearch(event.target.value)}
@@ -799,7 +797,7 @@ export function ProjectDetailPage() {
           <Card>
             <CardContent className="p-0">
               {githubRepos.isLoading ? (
-                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                <p className="px-4 py-8 text-center text-[12px] text-muted">
                   Loading repositories from GitHub…
                 </p>
               ) : githubRepos.isError ? (
@@ -807,46 +805,48 @@ export function ProjectDetailPage() {
                   {errorText(githubRepos.error)}
                 </p>
               ) : filteredRepos.length === 0 ? (
-                <p className="px-4 py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+                <p className="px-4 py-8 text-center text-[12px] text-muted">
                   {repoSearch.trim()
                     ? "No repository matches that search."
                     : "This installation cannot see any repositories."}
                 </p>
               ) : (
-                <div className="divide-y divide-line/40">
+                <div className="divide-y divide-line/45">
                   {filteredRepos.map((repo) => (
                     <button
                       key={repo.id}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-recessed/70"
                       onClick={() => selectGitHubRepository(repo)}
                     >
-                      <Github className="h-4 w-4 shrink-0 text-black/35 dark:text-white/30" />
+                      <Github className="h-4 w-4 shrink-0 text-muted" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium">{repo.fullName}</span>
+                          <span className="truncate text-[13px] font-medium text-ink">
+                            {repo.fullName}
+                          </span>
                           {repo.private && (
-                            <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                            <span className="rounded-full border border-warn/25 bg-warn/12 px-1.5 py-0.5 text-[10px] font-medium text-warn">
                               Private
                             </span>
                           )}
                           {repo.archived && (
-                            <span className="rounded-full bg-black/[0.06] px-1.5 py-0.5 text-[10px] text-black/50 dark:bg-white/[0.08] dark:text-white/40">
+                            <span className="rounded-full border border-line/60 bg-subtle px-1.5 py-0.5 text-[10px] text-muted">
                               Archived
                             </span>
                           )}
                         </span>
-                        <span className="block truncate text-[11px] text-black/45 dark:text-white/40">
+                        <span className="block truncate text-[11px] text-muted">
                           default branch {repo.defaultBranch || "main"}
                         </span>
                       </span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
                     </button>
                   ))}
                 </div>
               )}
               {githubRepos.data &&
                 githubRepos.data.totalCount > githubRepos.data.repositories.length && (
-                  <p className="border-t border-line/40 px-4 py-2 text-[10.5px] text-black/40 dark:text-white/35">
+                  <p className="border-t border-line/50 px-4 py-2 text-[10.5px] text-faint">
                     Showing the first {githubRepos.data.repositories.length} of{" "}
                     {githubRepos.data.totalCount} repositories.
                   </p>
@@ -857,7 +857,7 @@ export function ProjectDetailPage() {
       ) : githubStep === "configure" ? (
         <>
           <button
-            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
             onClick={() => {
               setAppSource(null);
               setGithubStep("repos");
@@ -879,21 +879,21 @@ export function ProjectDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-recessed text-ink">
                     <Github className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-[13px] font-medium">
+                      <span className="truncate text-[13px] font-semibold text-ink">
                         {githubRepo?.fullName}
                       </span>
                       {githubRepo?.private && (
-                        <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                        <span className="rounded-full border border-warn/25 bg-warn/12 px-1.5 py-0.5 text-[10px] font-medium text-warn">
                           Private
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-black/45 dark:text-white/40">
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
                       {githubRepo?.cloneUrl}
                     </div>
                   </div>
@@ -1028,19 +1028,19 @@ export function ProjectDetailPage() {
                         </option>
                       ))}
                   </Select>
-                  <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+                  <p className="mt-1 text-[10.5px] text-faint">
                     The server cannot be changed after the application is created.
                   </p>
                 </div>
 
-                <label className="flex items-center gap-2 border-t border-line/40 pt-3 text-[12px] text-black/60 dark:text-white/55">
+                <label className="flex items-center gap-2 border-t border-line/50 pt-3 text-[12px] text-muted">
                   <input
                     type="checkbox"
                     checked={autoDeploy}
                     onChange={(event) => setAutoDeploy(event.target.checked)}
                   />
                   Deploy automatically on every push to{" "}
-                  <span className="font-mono">{appForm.branch || "main"}</span>
+                  <span className="font-mono text-ink">{appForm.branch || "main"}</span>
                 </label>
 
                 {createApplication.isError && (
@@ -1053,7 +1053,7 @@ export function ProjectDetailPage() {
       ) : (
         <>
           <button
-            className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+            className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
             onClick={() => setView("resources")}
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -1067,7 +1067,7 @@ export function ProjectDetailPage() {
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <div className="relative min-w-56 flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-black/35 dark:text-white/30" />
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -1090,7 +1090,7 @@ export function ProjectDetailPage() {
             <Card className="mb-4">
               <CardHeader>
                 <CardTitle>Applications</CardTitle>
-                <span className="text-[11px] text-black/40 dark:text-white/35">
+                <span className="text-[11px] text-faint">
                   Deploy from a repository or an image
                 </span>
               </CardHeader>
@@ -1099,25 +1099,27 @@ export function ProjectDetailPage() {
                   {filteredSources.map((source) => (
                     <div
                       key={source.kind}
-                      className="flex flex-col rounded-[8px] border border-line/60 bg-base p-3.5 transition-colors hover:border-brand/40"
+                      className="flex flex-col rounded-xl border border-line/70 bg-recessed/35 p-3.5 transition-colors hover:border-brand/45"
                     >
                       <div className="flex items-center gap-2.5">
                         <span
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${source.iconClass}`}
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${source.iconClass}`}
                         >
                           {source.icon}
                         </span>
                         <div className="min-w-0">
-                          <div className="truncate text-[13px] font-semibold">{source.title}</div>
-                          <div className="text-[10px] tracking-wider text-black/40 uppercase dark:text-white/30">
+                          <div className="truncate text-[13px] font-semibold text-ink">
+                            {source.title}
+                          </div>
+                          <div className="text-[10px] font-medium tracking-wider text-faint uppercase">
                             {source.tag}
                           </div>
                         </div>
                       </div>
-                      <p className="mt-3 flex-1 text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+                      <p className="mt-3 flex-1 text-[11.5px] leading-relaxed text-muted">
                         {source.description}
                       </p>
-                      <div className="mt-3 flex justify-end border-t border-line/40 pt-3">
+                      <div className="mt-3 flex justify-end border-t border-line/45 pt-3">
                         <Button
                           variant="primary"
                           size="sm"
@@ -1145,7 +1147,7 @@ export function ProjectDetailPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Databases</CardTitle>
-                <span className="text-[11px] text-black/40 dark:text-white/35">
+                <span className="text-[11px] text-faint">
                   One-click managed services with generated credentials
                 </span>
               </CardHeader>
@@ -1154,25 +1156,27 @@ export function ProjectDetailPage() {
                   {filteredDatabases.map((card) => (
                     <div
                       key={card.kind}
-                      className="flex flex-col rounded-[8px] border border-line/60 bg-base p-3.5 transition-colors hover:border-brand/40"
+                      className="flex flex-col rounded-xl border border-line/70 bg-recessed/35 p-3.5 transition-colors hover:border-brand/45"
                     >
                       <div className="flex items-center gap-2.5">
                         <span
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${card.iconClass}`}
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${card.iconClass}`}
                         >
                           <DatabaseIcon className="h-4 w-4" />
                         </span>
                         <div className="min-w-0">
-                          <div className="truncate text-[13px] font-semibold">{card.title}</div>
-                          <div className="text-[10px] tracking-wider text-black/40 uppercase dark:text-white/30">
+                          <div className="truncate text-[13px] font-semibold text-ink">
+                            {card.title}
+                          </div>
+                          <div className="text-[10px] font-medium tracking-wider text-faint uppercase">
                             version {card.version}
                           </div>
                         </div>
                       </div>
-                      <p className="mt-3 flex-1 text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+                      <p className="mt-3 flex-1 text-[11.5px] leading-relaxed text-muted">
                         {card.description}
                       </p>
-                      <div className="mt-3 flex justify-end border-t border-line/40 pt-3">
+                      <div className="mt-3 flex justify-end border-t border-line/45 pt-3">
                         <Button
                           variant="primary"
                           size="sm"
@@ -1406,21 +1410,21 @@ export function ProjectDetailPage() {
       >
         {credentials ? (
           <div className="space-y-3">
-            <p className="text-[12px] text-black/60 dark:text-white/55">
+            <p className="text-[12px] text-muted">
               Store these credentials now — the password is not shown again. They are already
               attached to this database&apos;s environment variables for linked apps.
             </p>
-            <div className="space-y-2 rounded-md bg-black/25 p-3 font-mono text-[12px]">
+            <div className="space-y-2 rounded-lg border border-line/70 bg-recessed p-3 font-mono text-[12px] text-ink">
               <div className="flex justify-between gap-4">
-                <span className="text-white/45">user</span>
+                <span className="text-muted">user</span>
                 <span className="select-all">{credentials.user || "default"}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-white/45">password</span>
+                <span className="text-muted">password</span>
                 <span className="select-all">{credentials.password}</span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-white/45">port</span>
+                <span className="text-muted">port</span>
                 <span>{credentials.port}</span>
               </div>
             </div>

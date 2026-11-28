@@ -57,28 +57,30 @@ function eventTone(event: ResourceGuardEvent) {
 function EventRow({ event }: { event: ResourceGuardEvent }) {
   return (
     <li className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-2.5">
-      <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-        event.status === "failed" ? "bg-danger" : event.action === "stop" ? "bg-warn" : "bg-brand"
-      }`} />
+      <span
+        className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+          event.status === "failed" ? "bg-danger" : event.action === "stop" ? "bg-warn" : "bg-brand"
+        }`}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-[12px] font-medium">{event.applicationName || "application"}</span>
-          <span className="rounded-full bg-white/[0.04] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:text-white/35">
+          <span className="text-[12px] font-medium text-ink">
+            {event.applicationName || "application"}
+          </span>
+          <span className="rounded-full border border-line/60 bg-subtle/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
             {metricLabel(event.metric)}
           </span>
           <span className={`text-[11px] font-medium ${eventTone(event)}`}>
             {actionLabel(event.action)}
           </span>
-          <span className="text-[10.5px] tabular-nums text-black/40 dark:text-white/35">
+          <span className="text-[10.5px] tabular-nums text-faint">
             {event.observedPercent.toFixed(1)}% / {event.thresholdPercent}%
           </span>
         </div>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-black/55 dark:text-white/45">
-          {event.message}
-        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-muted">{event.message}</p>
         {event.error && <p className="mt-0.5 text-[10.5px] text-danger">{event.error}</p>}
       </div>
-      <div className="flex shrink-0 items-center gap-2 text-[10.5px] text-black/40 dark:text-white/35">
+      <div className="flex shrink-0 items-center gap-2 text-[10.5px] text-faint">
         {event.usageBytes ? <span>{formatBytes(event.usageBytes)}</span> : null}
         <span>{formatDate(event.createdAt)}</span>
         {event.status === "success" ? (
@@ -137,7 +139,7 @@ export function ResourceGuardPanel() {
   if (!form) {
     return (
       <Card>
-        <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+        <CardContent className="py-8 text-center text-[12px] text-muted">
           Loading resource protection…
         </CardContent>
       </Card>
@@ -171,16 +173,20 @@ export function ResourceGuardPanel() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-[16px] font-semibold tracking-tight">Resource protection</h2>
-          <p className="mt-0.5 text-[12px] text-black/50 dark:text-white/45">
+          <h2 className="text-[16px] font-semibold tracking-tight text-ink">Resource protection</h2>
+          <p className="mt-0.5 text-[12px] text-muted">
             Watch managed application containers on every server and act on sustained CPU or memory pressure.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
-            form.enabled ? "bg-ok/10 text-ok" : "bg-white/[0.05] text-black/45 dark:text-white/35"
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${form.enabled ? "bg-ok" : "bg-white/30"}`} />
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-medium ${
+              form.enabled
+                ? "border-ok/25 bg-ok/12 text-ok"
+                : "border-line/70 bg-subtle/75 text-muted"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${form.enabled ? "bg-ok" : "bg-faint"}`} />
             {form.enabled ? "Guard active" : "Guard disabled"}
           </span>
           <Button
@@ -198,23 +204,27 @@ export function ResourceGuardPanel() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <ShieldCheck className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">Watch scope</div>
-              <div className="mt-0.5 text-[13px] font-medium">All servers</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                Watch scope
+              </div>
+              <div className="mt-0.5 text-[13px] font-semibold text-ink">All servers</div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <Cpu className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">CPU default</div>
-              <div className="mt-0.5 text-[13px] font-medium capitalize">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                CPU default
+              </div>
+              <div className="mt-0.5 text-[13px] font-semibold capitalize text-ink">
                 {form.cpuEnabled ? form.cpuAction : "off"} after {minutes(form.cpuDurationSeconds)}m
               </div>
             </div>
@@ -222,12 +232,14 @@ export function ResourceGuardPanel() {
         </Card>
         <Card>
           <CardContent className="flex items-start gap-2.5 py-3">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.04] text-black/50 dark:text-white/40">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md border border-line/60 bg-recessed text-muted">
               <MemoryStick className="h-3.5 w-3.5" />
             </span>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">Memory default</div>
-              <div className="mt-0.5 text-[13px] font-medium capitalize">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                Memory default
+              </div>
+              <div className="mt-0.5 text-[13px] font-semibold capitalize text-ink">
                 {form.memoryEnabled ? form.memoryAction : "off"} after {minutes(form.memoryDurationSeconds)}m
               </div>
             </div>
@@ -239,7 +251,7 @@ export function ResourceGuardPanel() {
         <CardHeader>
           <div>
             <CardTitle>Container thresholds</CardTitle>
-            <p className="mt-0.5 text-[11px] text-black/45 dark:text-white/40">
+            <p className="mt-0.5 text-[11px] text-muted">
               A condition must persist for the whole duration before the guard acts. Short spikes are ignored.
             </p>
           </div>
@@ -250,10 +262,10 @@ export function ResourceGuardPanel() {
           />
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 rounded-md bg-white/[0.02] p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
+          <div className="grid gap-3 rounded-lg border border-line/60 bg-recessed/50 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
             <div className="flex items-center gap-2 pb-1.5">
-              <Cpu className="h-4 w-4 text-black/45 dark:text-white/40" />
-              <span className="text-[12px] font-medium">CPU</span>
+              <Cpu className="h-4 w-4 text-muted" />
+              <span className="text-[12px] font-medium text-ink">CPU</span>
               <Switch
                 checked={form.cpuEnabled}
                 aria-label="Enable CPU protection"
@@ -280,7 +292,9 @@ export function ResourceGuardPanel() {
                 min={1}
                 value={minutes(form.cpuDurationSeconds)}
                 disabled={!form.cpuEnabled}
-                onChange={(event) => update("cpuDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)}
+                onChange={(event) =>
+                  update("cpuDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)
+                }
               />
             </div>
             <div>
@@ -289,7 +303,9 @@ export function ResourceGuardPanel() {
                 id="guard-cpu-action"
                 value={form.cpuAction}
                 disabled={!form.cpuEnabled}
-                onChange={(event) => update("cpuAction", event.target.value as ResourceGuardSettings["cpuAction"])}
+                onChange={(event) =>
+                  update("cpuAction", event.target.value as ResourceGuardSettings["cpuAction"])
+                }
               >
                 <option value="notify">Notify only</option>
                 <option value="throttle">Throttle and notify</option>
@@ -309,16 +325,16 @@ export function ResourceGuardPanel() {
                 disabled={!form.cpuEnabled}
                 onChange={(event) => update("cpuThrottlePercent", Number(event.target.value) || 1)}
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+              <p className="mt-1 text-[10.5px] text-faint">
                 The container keeps running with a temporary CPU cap until its next deployment.
               </p>
             </div>
           )}
 
-          <div className="grid gap-3 rounded-md bg-white/[0.02] p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
+          <div className="grid gap-3 rounded-lg border border-line/60 bg-recessed/50 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-end">
             <div className="flex items-center gap-2 pb-1.5">
-              <MemoryStick className="h-4 w-4 text-black/45 dark:text-white/40" />
-              <span className="text-[12px] font-medium">Memory</span>
+              <MemoryStick className="h-4 w-4 text-muted" />
+              <span className="text-[12px] font-medium text-ink">Memory</span>
               <Switch
                 checked={form.memoryEnabled}
                 aria-label="Enable memory protection"
@@ -336,7 +352,7 @@ export function ResourceGuardPanel() {
                 disabled={!form.memoryEnabled}
                 onChange={(event) => update("memoryPercent", Number(event.target.value) || 1)}
               />
-              <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+              <p className="mt-1 text-[10.5px] text-faint">
                 Measured against the container limit, or host RAM when no limit is set.
               </p>
             </div>
@@ -348,7 +364,9 @@ export function ResourceGuardPanel() {
                 min={1}
                 value={minutes(form.memoryDurationSeconds)}
                 disabled={!form.memoryEnabled}
-                onChange={(event) => update("memoryDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)}
+                onChange={(event) =>
+                  update("memoryDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)
+                }
               />
             </div>
             <div>
@@ -357,7 +375,9 @@ export function ResourceGuardPanel() {
                 id="guard-memory-action"
                 value={form.memoryAction}
                 disabled={!form.memoryEnabled}
-                onChange={(event) => update("memoryAction", event.target.value as ResourceGuardSettings["memoryAction"])}
+                onChange={(event) =>
+                  update("memoryAction", event.target.value as ResourceGuardSettings["memoryAction"])
+                }
               >
                 <option value="notify">Notify only</option>
                 <option value="stop">Stop container</option>
@@ -371,7 +391,7 @@ export function ResourceGuardPanel() {
         <CardHeader>
           <div>
             <CardTitle>Host memory emergency</CardTitle>
-            <p className="mt-0.5 text-[11px] text-black/45 dark:text-white/40">
+            <p className="mt-0.5 text-[11px] text-muted">
               When the whole machine is nearly out of RAM, stop the largest protected application on that server.
             </p>
           </div>
@@ -402,7 +422,9 @@ export function ResourceGuardPanel() {
               min={1}
               value={minutes(form.hostMemoryDurationSeconds)}
               disabled={!form.hostMemoryEnabled}
-              onChange={(event) => update("hostMemoryDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)}
+              onChange={(event) =>
+                update("hostMemoryDurationSeconds", Math.max(1, Number(event.target.value) || 1) * 60)
+              }
             />
           </div>
         </CardContent>
@@ -420,9 +442,11 @@ export function ResourceGuardPanel() {
               type="number"
               min={0}
               value={minutes(form.graceSeconds)}
-              onChange={(event) => update("graceSeconds", Math.max(0, Number(event.target.value) || 0) * 60)}
+              onChange={(event) =>
+                update("graceSeconds", Math.max(0, Number(event.target.value) || 0) * 60)
+              }
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1 text-[10.5px] text-faint">
               Deployments and cold starts get time to settle.
             </p>
           </div>
@@ -433,9 +457,11 @@ export function ResourceGuardPanel() {
               type="number"
               min={0}
               value={minutes(form.cooldownSeconds)}
-              onChange={(event) => update("cooldownSeconds", Math.max(0, Number(event.target.value) || 0) * 60)}
+              onChange={(event) =>
+                update("cooldownSeconds", Math.max(0, Number(event.target.value) || 0) * 60)
+              }
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1 text-[10.5px] text-faint">
               Prevents repeated actions while an application or host recovers.
             </p>
           </div>
@@ -443,12 +469,12 @@ export function ResourceGuardPanel() {
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[10.5px] text-black/40 dark:text-white/35">
+        <p className="text-[10.5px] text-faint">
           The guard samples every 30 seconds. It never targets the panel, proxy, build sandbox, databases or services.
           Compose stacks are managed as a stack and are not individually guarded yet.
         </p>
         <div className="flex items-center gap-2">
-          {dirty && <span className="text-[10.5px] text-warn">Unsaved changes</span>}
+          {dirty && <span className="text-[11px] font-medium text-warn">Unsaved changes</span>}
           <Button
             variant="primary"
             size="sm"
@@ -463,17 +489,17 @@ export function ResourceGuardPanel() {
       <Card>
         <CardHeader>
           <CardTitle>Recent actions</CardTitle>
-          <Activity className="h-3.5 w-3.5 text-black/35 dark:text-white/30" />
+          <Activity className="h-3.5 w-3.5 text-faint" />
         </CardHeader>
         <CardContent className="p-0">
           {events.isLoading ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">Loading actions…</p>
+            <p className="px-4 py-6 text-center text-[12px] text-muted">Loading actions…</p>
           ) : !events.data?.length ? (
-            <p className="px-4 py-6 text-center text-[12px] text-black/45 dark:text-white/40">
+            <p className="px-4 py-6 text-center text-[12px] text-muted">
               No guard action has been recorded yet.
             </p>
           ) : (
-            <ul className="divide-y divide-line/40">
+            <ul className="divide-y divide-line/45">
               {events.data.map((event) => (
                 <EventRow key={event.id} event={event} />
               ))}
@@ -503,9 +529,10 @@ export function ApplicationResourceGuardCard({
   });
   const events = useQuery({
     queryKey: ["resource-guard", "events", applicationId],
-    queryFn: () => api.get<ResourceGuardEvent[]>(
-      `/resource-guard/events?applicationId=${encodeURIComponent(applicationId)}&limit=3`,
-    ),
+    queryFn: () =>
+      api.get<ResourceGuardEvent[]>(
+        `/resource-guard/events?applicationId=${encodeURIComponent(applicationId)}&limit=3`,
+      ),
     refetchInterval: 20_000,
   });
   const [enabled, setEnabled] = useState(app.resourceGuardEnabled);
@@ -561,7 +588,7 @@ export function ApplicationResourceGuardCard({
       <CardHeader>
         <div>
           <CardTitle>Resource protection</CardTitle>
-          <p className="mt-0.5 text-[11px] text-black/45 dark:text-white/40">
+          <p className="mt-0.5 text-[11px] text-muted">
             {enabled
               ? `Effective policy: CPU ${effectiveCpuAction} above ${effectiveCpu}%; memory ${effectiveMemoryAction} above ${effectiveMemory}%.`
               : "The panel-wide guard will not act on this application."}
@@ -585,9 +612,11 @@ export function ApplicationResourceGuardCard({
               value={cpuPercent || ""}
               disabled={!enabled}
               placeholder={`inherit ${global.data?.cpuPercent ?? 40}`}
-              onChange={(event) => setCpuPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
+              onChange={(event) =>
+                setCpuPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))
+              }
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1 text-[10.5px] text-faint">
               Percentage of total host CPU. Leave empty to inherit.
             </p>
           </div>
@@ -601,9 +630,11 @@ export function ApplicationResourceGuardCard({
               value={memoryPercent || ""}
               disabled={!enabled}
               placeholder={`inherit ${global.data?.memoryPercent ?? 60}`}
-              onChange={(event) => setMemoryPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))}
+              onChange={(event) =>
+                setMemoryPercent(Math.max(0, Math.min(100, Number(event.target.value) || 0)))
+              }
             />
-            <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+            <p className="mt-1 text-[10.5px] text-faint">
               Percentage of the configured memory limit, or host RAM if unlimited.
             </p>
           </div>
@@ -637,7 +668,7 @@ export function ApplicationResourceGuardCard({
         </div>
 
         {enabled && effectiveCpuAction === "throttle" && (
-          <div className="flex items-start gap-2 rounded-md bg-brand/5 px-3 py-2 text-[11px] leading-relaxed text-brand">
+          <div className="flex items-start gap-2 rounded-lg border border-brand/20 bg-brand/8 px-3 py-2 text-[11px] leading-relaxed text-brand">
             <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Sustained CPU will be capped to {global.data?.cpuThrottlePercent ?? 25}% of host CPU. The saved CPU limit is restored on the next deployment.
@@ -645,7 +676,7 @@ export function ApplicationResourceGuardCard({
           </div>
         )}
         {enabled && effectiveMemoryAction === "stop" && (
-          <div className="flex items-start gap-2 rounded-md bg-warn/10 px-3 py-2 text-[11px] leading-relaxed text-warn">
+          <div className="flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[11px] leading-relaxed text-warn">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Sustained memory pressure stops the container. The panel does not restart it automatically.
@@ -654,18 +685,24 @@ export function ApplicationResourceGuardCard({
         )}
 
         {events.data?.length ? (
-          <div className="border-t border-line/40 pt-3">
-            <div className="mb-1 text-[10px] uppercase tracking-wide text-black/40 dark:text-white/35">
+          <div className="border-t border-line/50 pt-3">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-faint">
               Recent protection actions
             </div>
             <ul className="space-y-1.5">
               {events.data.map((event) => (
                 <li key={event.id} className="flex items-start gap-2 text-[11px]">
-                  <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-                    event.status === "failed" ? "bg-danger" : event.action === "stop" ? "bg-warn" : "bg-brand"
-                  }`} />
-                  <span className="min-w-0 flex-1 text-black/55 dark:text-white/45">{event.message}</span>
-                  <span className="shrink-0 text-[10px] text-black/35 dark:text-white/30">
+                  <span
+                    className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                      event.status === "failed"
+                        ? "bg-danger"
+                        : event.action === "stop"
+                          ? "bg-warn"
+                          : "bg-brand"
+                    }`}
+                  />
+                  <span className="min-w-0 flex-1 text-muted">{event.message}</span>
+                  <span className="shrink-0 text-[10px] text-faint">
                     {formatDate(event.createdAt)}
                   </span>
                 </li>
@@ -674,11 +711,16 @@ export function ApplicationResourceGuardCard({
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between border-t border-line/40 pt-3">
-          <p className="text-[10.5px] text-black/40 dark:text-white/35">
+        <div className="flex items-center justify-between border-t border-line/50 pt-3">
+          <p className="text-[10.5px] text-faint">
             CPU and memory ceilings are set in the card above.
           </p>
-          <Button variant="primary" size="sm" onClick={() => save.mutate()} disabled={save.isPending || !dirty}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !dirty}
+          >
             {save.isPending ? "Saving…" : "Save protection"}
           </Button>
         </div>

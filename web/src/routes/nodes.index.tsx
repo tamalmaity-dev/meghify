@@ -7,17 +7,15 @@ import { api } from "@/lib/api";
 import { PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 import type { Node } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** The singleton row that describes the machine the panel runs on. */
 const LOCAL_NODE_ID = "local";
 
 export function NodesPage() {
@@ -32,7 +30,10 @@ export function NodesPage() {
   });
 
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => api.get<Node[]>("/nodes") });
-  const keys = useQuery({ queryKey: ["ssh-keys"], queryFn: () => api.get<{ id: string; fingerprint: string }[]>("/ssh-keys") });
+  const keys = useQuery({
+    queryKey: ["ssh-keys"],
+    queryFn: () => api.get<{ id: string; fingerprint: string }[]>("/ssh-keys"),
+  });
 
   const [sshKeyId, setSSHKeyId] = useState("");
 
@@ -77,7 +78,7 @@ export function NodesPage() {
 
       {keys.data?.length === 0 && (
         <Card className="mb-4">
-          <CardContent className="py-4 text-[12px] text-black/55 dark:text-white/45">
+          <CardContent className="py-4 text-[12px] text-muted">
             Generate an SSH key first, then install its public half on the server you
             want to add.
           </CardContent>
@@ -87,7 +88,7 @@ export function NodesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Registered servers</CardTitle>
-          <span className="text-[11px] text-black/40 dark:text-white/35">
+          <span className="text-[11px] text-faint">
             {(nodes.data ?? []).length === 1 ? "1 server" : `${(nodes.data ?? []).length} servers`}
           </span>
         </CardHeader>
@@ -110,26 +111,28 @@ export function NodesPage() {
                   <Link
                     to="/nodes/$nodeId"
                     params={{ nodeId: node.id }}
-                    className="inline-flex items-center gap-2 font-medium hover:underline"
+                    className="inline-flex items-center gap-2 font-medium text-ink hover:text-brand hover:underline"
                   >
                     {node.name}
                     {node.id === LOCAL_NODE_ID && (
-                      <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                      <span className="rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
                         Default
                       </span>
                     )}
                   </Link>
                 </Td>
-                <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
-                  {node.id === LOCAL_NODE_ID ? "this panel" : `${node.sshUser}@${node.address}:${node.sshPort}`}
+                <Td className="font-mono text-[12px] text-muted">
+                  {node.id === LOCAL_NODE_ID
+                    ? "this panel"
+                    : `${node.sshUser}@${node.address}:${node.sshPort}`}
                 </Td>
                 <Td>
                   <StatusBadge status={node.status} />
                 </Td>
-                <Td className="text-black/55 dark:text-white/45">
+                <Td className="text-muted">
                   {node.os || "-"} {node.dockerVersion ? `· docker ${node.dockerVersion}` : ""}
                 </Td>
-                <Td align="right" className="text-black/55 dark:text-white/45">
+                <Td align="right" className="text-muted">
                   {node.cpus || "-"} vCPU
                 </Td>
                 <Td align="right">
@@ -158,11 +161,7 @@ export function NodesPage() {
                         </Button>
                       </>
                     )}
-                    <Link
-                      to="/nodes/$nodeId"
-                      params={{ nodeId: node.id }}
-                      className={cn("transition-transform", "hover:translate-x-0.5")}
-                    >
+                    <Link to="/nodes/$nodeId" params={{ nodeId: node.id }}>
                       <Button variant="ghost" size="icon" title="Open server">
                         <ChevronRight className="h-3.5 w-3.5" />
                       </Button>
@@ -172,11 +171,11 @@ export function NodesPage() {
               </Tr>
             ))}
             {(nodes.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-center text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-[12px] text-muted">
                   No servers registered. The panel can manage the machine it runs on.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>
@@ -197,18 +196,18 @@ export function NodesPage() {
           >
             {(keys.data ?? []).map((key) => (
               <Tr key={key.id}>
-                <Td className="font-mono text-[12px]">{key.fingerprint}</Td>
-                <Td align="right" className="text-black/45 dark:text-white/40">
+                <Td className="font-mono text-[12px] text-ink">{key.fingerprint}</Td>
+                <Td align="right" className="text-faint">
                   {new Date((key as unknown as { createdAt: string }).createdAt).toLocaleDateString()}
                 </Td>
               </Tr>
             ))}
             {(keys.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-center text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={2} className="px-4 py-8 text-center text-[12px] text-muted">
                   No keys generated yet.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>
@@ -265,7 +264,7 @@ export function NodesPage() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-[1fr_140px] gap-3">
+          <div className="grid grid-cols-[1fr_150px] gap-3">
             <div>
               <Label htmlFor="node-user">SSH user</Label>
               <Input
@@ -276,11 +275,10 @@ export function NodesPage() {
             </div>
             <div>
               <Label htmlFor="node-key">SSH key</Label>
-              <select
+              <Select
                 id="node-key"
                 value={sshKeyId}
                 onChange={(event) => setSSHKeyId(event.target.value)}
-                className="h-8 w-full rounded-md bg-recessed px-2 text-[13px] ring-1 ring-line/70 outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Select a key</option>
                 {(keys.data ?? []).map((key) => (
@@ -288,7 +286,7 @@ export function NodesPage() {
                     {key.fingerprint.slice(0, 18)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <div>

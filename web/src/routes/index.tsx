@@ -13,6 +13,7 @@ import { useSession } from "@/lib/session";
 import { PageHeader } from "@/components/app-shell";
 import { SystemMetrics } from "@/components/system-metrics";
 import { DockerDiskUsage } from "@/components/docker-disk";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
@@ -54,10 +55,10 @@ export function DashboardPage() {
         }
         actions={
           <Link to="/projects">
-            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand/10 px-3 text-[13px] font-medium text-brand">
+            <Button variant="primary">
               New project
               <ArrowRight className="h-3.5 w-3.5" />
-            </span>
+            </Button>
           </Link>
         }
       />
@@ -75,18 +76,21 @@ export function DashboardPage() {
           label="Projects"
           value={stats.data?.projects ?? "-"}
           hint={`${stats.data?.applications ?? 0} applications`}
+          to="/projects"
         />
         <StatTile
           icon={<Server className="h-4 w-4" />}
           label="Servers"
           value={stats.data?.onlineNodes ?? 0}
           hint={`${stats.data?.nodes ?? 0} registered`}
+          to={isAdmin ? "/nodes" : undefined}
         />
         <StatTile
           icon={<DatabaseIcon className="h-4 w-4" />}
           label="Databases"
           value={stats.data?.databases ?? "-"}
           hint={`${stats.data?.services ?? 0} compose stacks`}
+          to="/databases"
         />
         <StatTile
           icon={<Activity className="h-4 w-4" />}
@@ -97,6 +101,7 @@ export function DashboardPage() {
               ? `${deploying.length} deploying now`
               : `${stats.data?.pendingJobs ?? 0} queued jobs`
           }
+          to={isAdmin ? "/jobs" : undefined}
         />
       </div>
 
@@ -121,7 +126,7 @@ export function DashboardPage() {
                     <Link
                       to="/applications/$applicationId"
                       params={{ applicationId: app.id }}
-                      className="hover:underline"
+                      className="font-medium text-ink hover:text-brand hover:underline"
                     >
                       {app.name}
                     </Link>
@@ -129,7 +134,7 @@ export function DashboardPage() {
                   <Td>
                     <StatusBadge status={app.status} />
                   </Td>
-                  <Td align="right" className="text-black/45 dark:text-white/40">
+                  <Td align="right" className="text-muted">
                     in progress
                   </Td>
                 </Tr>
@@ -142,6 +147,11 @@ export function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Servers</CardTitle>
+          {isAdmin && (
+            <Link to="/nodes" className="text-[11.5px] font-medium text-brand hover:underline">
+              Manage servers
+            </Link>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <Table
@@ -156,24 +166,22 @@ export function DashboardPage() {
           >
             {(nodes.data ?? []).map((node) => (
               <Tr key={node.id}>
-                <Td>{node.name}</Td>
-                <Td className="font-mono text-[12px] text-black/55 dark:text-white/45">
-                  {node.address}
-                </Td>
+                <Td className="font-medium text-ink">{node.name}</Td>
+                <Td className="font-mono text-[12px] text-muted">{node.address}</Td>
                 <Td>
                   <StatusBadge status={node.status} />
                 </Td>
-                <Td align="right" className="text-black/55 dark:text-white/45">
+                <Td align="right" className="text-muted">
                   {node.cpus} vCPU · {formatBytes(node.memoryBytes)}
                 </Td>
               </Tr>
             ))}
             {(nodes.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-[12px] text-muted">
                   No servers registered yet. The panel manages the machine it runs on.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>
@@ -183,6 +191,9 @@ export function DashboardPage() {
         <Card className="mt-4">
           <CardHeader>
             <CardTitle>Projects</CardTitle>
+            <Link to="/projects" className="text-[11.5px] font-medium text-brand hover:underline">
+              View all
+            </Link>
           </CardHeader>
           <CardContent className="p-0">
             <Table
@@ -200,15 +211,13 @@ export function DashboardPage() {
                     <Link
                       to="/projects/$projectId"
                       params={{ projectId: project.id }}
-                      className="hover:underline"
+                      className="font-medium text-ink hover:text-brand hover:underline"
                     >
                       {project.name}
                     </Link>
                   </Td>
-                  <Td className="text-black/55 dark:text-white/45">
-                    {project.description || "-"}
-                  </Td>
-                  <Td align="right" className="text-black/45 dark:text-white/40">
+                  <Td className="text-muted">{project.description || "-"}</Td>
+                  <Td align="right" className="text-faint">
                     {new Date(project.createdAt).toLocaleDateString()}
                   </Td>
                 </Tr>
@@ -226,26 +235,38 @@ function StatTile({
   label,
   value,
   hint,
+  to,
 }: {
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
   hint: string;
+  to?: string;
 }) {
-  return (
-    <Card className="min-h-28">
-      <CardHeader className="pb-1">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.06] text-black/60 dark:text-white/55">
-          {icon}
+  const inner = (
+    <Card
+      className={
+        to
+          ? "min-h-28 transition-[border-color,transform] hover:-translate-y-px hover:border-brand/45"
+          : "min-h-28"
+      }
+    >
+      <CardContent className="pt-4">
+        <div className="flex items-center justify-between">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-line/60 bg-recessed text-brand">
+            {icon}
+          </div>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+            {label}
+          </span>
         </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="text-[20px] font-semibold tabular-nums">{value}</div>
-        <div className="text-[11px] text-black/45 dark:text-white/40">{label}</div>
-        <div className="mt-1 text-[11px] text-black/40 dark:text-white/35">{hint}</div>
+        <div className="mt-3 text-[22px] font-semibold tabular-nums text-ink">{value}</div>
+        <div className="mt-1 text-[11px] text-faint">{hint}</div>
       </CardContent>
     </Card>
   );
+
+  return to ? <Link to={to}>{inner}</Link> : inner;
 }
 
 export const Route = createFileRoute("/")({

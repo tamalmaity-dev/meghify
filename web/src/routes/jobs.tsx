@@ -7,7 +7,6 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import type { Job } from "@/lib/types";
 import { createFileRoute } from "@tanstack/react-router";
 
-/** Friendly names for the queue's job kinds. */
 const KIND_LABELS: Record<string, string> = {
   deploy: "Application deploy",
   build_image: "Compose stack build",
@@ -16,11 +15,6 @@ const KIND_LABELS: Record<string, string> = {
   node_metrics: "Host metrics",
 };
 
-/**
- * The durable queue powers deploys, backups and housekeeping. Surfacing it makes
- * a stuck job obvious instead of leaving it as a mystery outage. Host metrics are
- * sampled outside the queue, so every row here is real work.
- */
 export function JobsPage() {
   const jobs = useQuery({
     queryKey: ["jobs"],
@@ -29,6 +23,8 @@ export function JobsPage() {
   });
 
   const pending = (jobs.data ?? []).filter((job) => !job.finishedAt);
+  const failed = (jobs.data ?? []).filter((job) => job.status === "failed").length;
+  const done = (jobs.data ?? []).filter((job) => job.status === "done").length;
 
   return (
     <>
@@ -40,24 +36,20 @@ export function JobsPage() {
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <Card className="min-h-20">
           <CardContent className="pt-4">
-            <div className="text-[20px] font-semibold tabular-nums">{pending.length}</div>
-            <div className="text-[11px] text-black/45 dark:text-white/40">In flight</div>
+            <div className="text-[22px] font-semibold tabular-nums text-ink">{pending.length}</div>
+            <div className="text-[11px] font-medium text-muted">In flight</div>
           </CardContent>
         </Card>
         <Card className="min-h-20">
           <CardContent className="pt-4">
-            <div className="text-[20px] font-semibold tabular-nums">
-              {(jobs.data ?? []).filter((job) => job.status === "failed").length}
-            </div>
-            <div className="text-[11px] text-black/45 dark:text-white/40">Failed</div>
+            <div className="text-[22px] font-semibold tabular-nums text-danger">{failed}</div>
+            <div className="text-[11px] font-medium text-muted">Failed</div>
           </CardContent>
         </Card>
         <Card className="min-h-20">
           <CardContent className="pt-4">
-            <div className="text-[20px] font-semibold tabular-nums">
-              {(jobs.data ?? []).filter((job) => job.status === "done").length}
-            </div>
-            <div className="text-[11px] text-black/45 dark:text-white/40">Completed</div>
+            <div className="text-[22px] font-semibold tabular-nums text-ok">{done}</div>
+            <div className="text-[11px] font-medium text-muted">Completed</div>
           </CardContent>
         </Card>
       </div>
@@ -81,29 +73,29 @@ export function JobsPage() {
             {(jobs.data ?? []).map((job) => (
               <Tr key={job.id}>
                 <Td>
-                  <div className="text-[12px]">{KIND_LABELS[job.kind] ?? job.kind}</div>
-                  <div className="font-mono text-[10.5px] text-black/40 dark:text-white/30">
-                    {job.kind}
+                  <div className="text-[12.5px] font-medium text-ink">
+                    {KIND_LABELS[job.kind] ?? job.kind}
                   </div>
+                  <div className="font-mono text-[10.5px] text-faint">{job.kind}</div>
                 </Td>
                 <Td>
                   <StatusBadge status={job.status} />
                 </Td>
-                <Td className="tabular-nums text-black/55 dark:text-white/45">
+                <Td className="tabular-nums text-muted">
                   {job.attempts}/{job.maxAttempts}
                 </Td>
                 <Td className="max-w-xs truncate text-[11px] text-danger">{job.lastError || "-"}</Td>
-                <Td align="right" className="text-black/45 dark:text-white/40">
+                <Td align="right" className="text-faint">
                   {new Date(job.createdAt).toLocaleTimeString()}
                 </Td>
               </Tr>
             ))}
             {(jobs.data ?? []).length === 0 && (
-              <Tr>
-                <Td align="center" className="text-center text-black/45 dark:text-white/40">
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-[12px] text-muted">
                   The queue is empty. Jobs appear here while they run.
-                </Td>
-              </Tr>
+                </td>
+              </tr>
             )}
           </Table>
         </CardContent>

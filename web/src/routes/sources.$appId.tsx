@@ -15,7 +15,6 @@ import { createFileRoute } from "@tanstack/react-router";
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** github.com unless the source points at a GitHub Enterprise server. */
 const webBase = (app: GitHubApp) => app.baseUrl || "https://github.com";
 
 const PERMISSIONS = [
@@ -24,10 +23,6 @@ const PERMISSIONS = [
   { name: "Email addresses", access: "read", why: "attribute commits to their authors" },
 ];
 
-/**
- * One GitHub App: the Coolify-style setup screen until GitHub issues the
- * credentials, and the source's home afterwards (installations, install link).
- */
 export function SourceDetailPage() {
   const { appId } = useParams({ from: "/sources/$appId" });
   const queryClient = useQueryClient();
@@ -98,12 +93,12 @@ export function SourceDetailPage() {
   if (!app.data) {
     return (
       <>
-        <Link className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 dark:text-white/40" to="/sources">
+        <Link className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted hover:text-ink" to="/sources">
           <ChevronLeft className="h-3.5 w-3.5" />
           All sources
         </Link>
         <Card>
-          <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+          <CardContent className="py-8 text-center text-[12px] text-muted">
             {app.isError ? errorText(app.error) : "Loading source…"}
           </CardContent>
         </Card>
@@ -121,7 +116,7 @@ export function SourceDetailPage() {
   return (
     <>
       <button
-        className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+        className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
         onClick={() => navigate({ to: "/sources" })}
       >
         <ChevronLeft className="h-3.5 w-3.5" />
@@ -139,7 +134,7 @@ export function SourceDetailPage() {
           source.configured ? (
             <>
               {attached.length > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/25 bg-ok/12 px-2.5 py-0.5 text-[10.5px] font-medium text-ok">
                   <span className="h-1.5 w-1.5 rounded-full bg-ok" />
                   Connected
                 </span>
@@ -174,7 +169,7 @@ export function SourceDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Automated installation</CardTitle>
-              <span className="rounded-full bg-ok/10 px-2 py-0.5 text-[10px] font-medium text-ok">
+              <span className="rounded-full border border-ok/25 bg-ok/12 px-2 py-0.5 text-[10px] font-medium text-ok">
                 Recommended
               </span>
             </CardHeader>
@@ -186,24 +181,22 @@ export function SourceDetailPage() {
                     {manifest.data?.webhookUrl ?? "Loading endpoint…"}
                   </option>
                 </Select>
-                <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/30">
+                <p className="mt-1 text-[10.5px] text-faint">
                   GitHub sends a push event here every time code lands on a tracked branch.
                 </p>
               </div>
 
               <div>
                 <Label>Mandatory permissions</Label>
-                <div className="mt-1 overflow-hidden rounded-md border border-line/60">
+                <div className="mt-1 overflow-hidden rounded-lg border border-line/70 bg-recessed/40">
                   {PERMISSIONS.map((permission) => (
                     <div
                       key={permission.name}
-                      className="flex items-center justify-between gap-3 border-b border-line/40 px-3 py-2 last:border-b-0"
+                      className="flex items-center justify-between gap-3 border-b border-line/45 px-3 py-2 last:border-b-0"
                     >
-                      <span className="font-medium">{permission.name}</span>
-                      <span className="text-[10.5px] text-black/40 dark:text-white/30">
-                        {permission.why}
-                      </span>
-                      <span className="rounded-full bg-black/[0.05] px-1.5 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">
+                      <span className="font-medium text-ink">{permission.name}</span>
+                      <span className="text-[10.5px] text-muted">{permission.why}</span>
+                      <span className="rounded-full border border-line/60 bg-subtle/75 px-1.5 py-0.5 font-mono text-[10px] text-muted">
                         {permission.access}
                       </span>
                     </div>
@@ -228,7 +221,7 @@ export function SourceDetailPage() {
                   {manifest.isError ? errorText(manifest.error) : "Preparing manifest…"}
                 </Button>
               )}
-              <p className="text-[10.5px] leading-relaxed text-black/40 dark:text-white/30">
+              <p className="text-[10.5px] leading-relaxed text-faint">
                 GitHub opens a confirmation page showing these permissions, creates the app under
                 your account, then returns you here with its credentials.
               </p>
@@ -238,16 +231,16 @@ export function SourceDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Manual installation</CardTitle>
-              <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] font-medium text-black/50 dark:bg-white/[0.06] dark:text-white/40">
+              <span className="rounded-full border border-line/60 bg-subtle/75 px-2 py-0.5 text-[10px] font-medium text-muted">
                 Advanced
               </span>
             </CardHeader>
             <CardContent className="space-y-3 text-[12px]">
-              <p className="leading-relaxed text-black/55 dark:text-white/45">
+              <p className="leading-relaxed text-muted">
                 Already created the app on GitHub yourself? Paste its credentials and Meghify will
                 verify the private key before storing it.
               </p>
-              <ul className="list-inside list-disc space-y-1 text-[11px] text-black/45 dark:text-white/40">
+              <ul className="list-inside list-disc space-y-1 text-[11px] text-muted">
                 <li>Webhook URL: the endpoint shown on the left</li>
                 <li>Permissions: Contents (read), Metadata (read)</li>
                 <li>Events: pushes</li>
@@ -268,7 +261,7 @@ export function SourceDetailPage() {
                   href={`${base}/apps/${source.slug}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline"
                 >
                   App settings on GitHub
                   <ExternalLink className="h-3 w-3" />
@@ -279,19 +272,19 @@ export function SourceDetailPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label>Organization</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 text-[11.5px] text-black/70 dark:text-white/65">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 text-[11.5px] text-ink">
                     {source.organization || "Personal account"}
                   </div>
                 </div>
                 <div>
                   <Label>App ID</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-ink">
                     {source.appId}
                   </div>
                 </div>
                 <div>
                   <Label>Installation ID</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-ink">
                     {attached.length > 0
                       ? attached.map((installation) => installation.installationId).join(", ")
                       : "—"}
@@ -299,31 +292,31 @@ export function SourceDetailPage() {
                 </div>
                 <div>
                   <Label>Client ID</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-ink">
                     {source.clientId || "—"}
                   </div>
                 </div>
                 <div>
                   <Label>HTML URL</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-ink">
                     {base}
                   </div>
                 </div>
                 <div>
                   <Label>API URL</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px]">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-ink">
                     {source.baseUrl ? `${source.baseUrl}/api/v3` : "https://api.github.com"}
                   </div>
                 </div>
                 <div>
                   <Label>Webhook secret</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-black/50 dark:text-white/45">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-muted">
                     •••••••••••• <span className="text-[10.5px]">sealed</span>
                   </div>
                 </div>
                 <div>
                   <Label>Private key</Label>
-                  <div className="mt-1 truncate rounded-md bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-black/50 dark:text-white/45">
+                  <div className="mt-1 truncate rounded-lg border border-line/60 bg-recessed px-2.5 py-1.5 font-mono text-[11.5px] text-muted">
                     •••••••••••• <span className="text-[10.5px]">sealed</span>
                   </div>
                 </div>
@@ -334,7 +327,7 @@ export function SourceDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Installations</CardTitle>
-              <span className="text-[11px] text-black/40 dark:text-white/35">
+              <span className="text-[11px] text-faint">
                 {attached.length === 0
                   ? "not installed yet"
                   : attached.length === 1
@@ -344,7 +337,7 @@ export function SourceDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-[12px]">
               {attached.length === 0 ? (
-                <p className="text-black/50 dark:text-white/45">
+                <p className="text-muted">
                   Install the app on the GitHub account that owns your repositories. Only the
                   repositories you pick become visible to Meghify.
                 </p>
@@ -353,11 +346,13 @@ export function SourceDetailPage() {
                   {attached.map((installation) => (
                     <div
                       key={installation.id}
-                      className="flex items-center justify-between gap-3 rounded-md bg-recessed px-3 py-2"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-line/60 bg-recessed px-3 py-2"
                     >
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{installation.accountLogin}</div>
-                        <div className="text-[10.5px] text-black/40 dark:text-white/30">
+                        <div className="truncate font-medium text-ink">
+                          {installation.accountLogin}
+                        </div>
+                        <div className="text-[10.5px] text-muted">
                           {installation.accountType === "Organization" ? "Organization" : "User"}{" "}
                           ·{" "}
                           {installation.repositorySelection === "all"
@@ -369,14 +364,14 @@ export function SourceDetailPage() {
                   ))}
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2 border-t border-line/40 pt-3">
+              <div className="flex flex-wrap items-center gap-2 border-t border-line/50 pt-3">
                 <a href={installUrl} target="_blank" rel="noreferrer">
                   <Button variant="primary" size="sm">
                     <ExternalLink className="h-3.5 w-3.5" />
                     {attached.length === 0 ? "Install on GitHub" : "Manage on GitHub"}
                   </Button>
                 </a>
-                <span className="text-[10.5px] text-black/40 dark:text-white/30">
+                <span className="text-[10.5px] text-faint">
                   Grant access to more repositories any time on GitHub; press Refresh afterwards.
                 </span>
               </div>
@@ -387,10 +382,10 @@ export function SourceDetailPage() {
             <CardHeader>
               <CardTitle>Automatic deploys</CardTitle>
             </CardHeader>
-            <CardContent className="text-[12px] leading-relaxed text-black/55 dark:text-white/45">
+            <CardContent className="text-[12px] leading-relaxed text-muted">
               Applications created from this source redeploy whenever a push lands on their tracked
               branch. Toggle it per application on its page under{" "}
-              <span className="text-current">Source → Deploy on every push</span>.
+              <span className="font-medium text-ink">Source → Deploy on every push</span>.
             </CardContent>
           </Card>
         </div>

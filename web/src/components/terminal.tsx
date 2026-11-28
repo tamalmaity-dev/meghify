@@ -2,17 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ITheme } from "@xterm/xterm";
 import { Minus, Plus, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/**
- * An interactive terminal (xterm.js) wired to a panel WebSocket endpoint.
- * Terminal input has to travel in both directions, so this is the one place
- * the UI uses a WebSocket.
- *
- * The server pings an idle WebSocket every 20 seconds; the client also
- * reconnects with backoff if a proxy or laptop sleep drops it anyway. Font
- * size and colour theme are per-browser preferences, persisted locally and
- * shared by every terminal in the panel.
- */
+import { useTheme } from "@/lib/theme";
 
 const PREFS_KEY = "meghify.terminal.prefs";
 const MIN_FONT = 10;
@@ -20,7 +10,7 @@ const MAX_FONT = 22;
 
 type TerminalPrefs = { theme: string; fontSize: number };
 
-const THEMES: Record<string, { label: string; theme: ITheme }> = {
+const THEMES: Record<string, { label: string; light?: boolean; theme: ITheme }> = {
   midnight: {
     label: "Midnight",
     theme: {
@@ -126,7 +116,8 @@ const THEMES: Record<string, { label: string; theme: ITheme }> = {
     },
   },
   paper: {
-    label: "Paper",
+    label: "Paper (Light)",
+    light: true,
     theme: {
       background: "#f7f4ed",
       foreground: "#3f3a33",
@@ -153,8 +144,8 @@ const THEMES: Record<string, { label: string; theme: ITheme }> = {
   },
 };
 
-function loadPrefs(): TerminalPrefs {
-  const fallback: TerminalPrefs = { theme: "midnight", fontSize: 13 };
+function loadPrefs(defaultTheme: string): TerminalPrefs {
+  const fallback: TerminalPrefs = { theme: defaultTheme, fontSize: 13 };
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return fallback;
@@ -181,7 +172,7 @@ const STATUS_TEXT: Record<ConnectionState, string> = {
 };
 
 const STATUS_DOT: Record<ConnectionState, string> = {
-  connecting: "bg-white/40",
+  connecting: "bg-faint",
   connected: "bg-ok",
   reconnecting: "animate-pulse bg-warn",
   disconnected: "bg-danger",
@@ -202,6 +193,7 @@ export function XTerminal({
   className?: string;
   toolbar?: boolean;
 }) {
+  const { resolvedTheme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<{
     term: import("@xterm/xterm").Terminal;
@@ -209,9 +201,12 @@ export function XTerminal({
   } | null>(null);
   const connectRef = useRef<(() => void) | null>(null);
   const prefsRef = useRef<TerminalPrefs | null>(null);
-  const [prefs, setPrefs] = useState<TerminalPrefs>(loadPrefs);
+  const [prefs, setPrefs] = useState<TerminalPrefs>(() =>
+    loadPrefs(resolvedTheme === "light" ? "paper" : "midnight"),
+  );
   const [status, setStatus] = useState<ConnectionState>("connecting");
   const theme = THEMES[prefs.theme] ?? THEMES.midnight;
+  const lightToolbar = Boolean(theme.light);
 
   useEffect(() => {
     prefsRef.current = prefs;
@@ -300,10 +295,6 @@ export function XTerminal({
               ? "\r\n\x1b[32mReconnected.\x1b[0m\r\n"
               : (banner ?? "\r\nConnected.\r\n"),
           );
-          // Only call the connection healthy after it has survived a few
-          // seconds. Otherwise a server that accepts and immediately closes
-          // (for example a container without /bin/sh) would reconnect in a
-          // tight loop because every open reset the backoff.
           window.clearTimeout(stableTimer);
           stableTimer = window.setTimeout(() => {
             retries = 0;
@@ -323,9 +314,6 @@ export function XTerminal({
         });
         ws.addEventListener("close", () => {
           if (socket !== ws) return;
-          // A connection that survived most of the healthy window still
-          // counts as unstable; otherwise a flap every few seconds would
-          // reset the backoff forever.
           window.clearTimeout(stableTimer);
           scheduleReconnect();
         });
@@ -362,8 +350,6 @@ export function XTerminal({
         socket.close();
       }
     };
-    // The theme and font-size effects below update the live terminal without
-    // tearing down the WebSocket.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, banner]);
 
@@ -385,17 +371,38 @@ export function XTerminal({
 
   return (
     <div
-      className={cn("flex min-h-0 flex-col overflow-hidden bg-[#0b0b10]", className ?? "h-[24rem]")}
+      className={cn("flex min-h-0 flex-col overflow-hidden", className ?? "h-[24rem]")}
       style={{ backgroundColor: theme.theme.background }}
     >
       {toolbar && (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-[#141419] px-2.5 text-[11px] text-white/70">
-          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[status])} />
-          <span className="font-medium text-white/80">{title ?? "Terminal"}</span>
-          {subtitle && (
-            <span className="hidden min-w-0 truncate text-white/35 sm:inline">{subtitle}</span>
+        <div
+          className={cn(
+            "flex h-9 shrink-0 items-center gap-2 border-b px-2.5 text-[11px]",
+            lightToolbar
+              ? "border-black/10 bg-[#ece8de] text-stone-700"
+              : "border-white/10 bg-[#141419] text-white/75",
           )}
-          <span className="hidden text-[10px] uppercase tracking-wide text-white/30 md:inline">
+        >
+          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[status])} />
+          <span className={cn("font-medium", lightToolbar ? "text-stone-900" : "text-white/90")}>
+            {title ?? "Terminal"}
+          </span>
+          {subtitle && (
+            <span
+              className={cn(
+                "hidden min-w-0 truncate sm:inline",
+                lightToolbar ? "text-stone-500" : "text-white/40",
+              )}
+            >
+              {subtitle}
+            </span>
+          )}
+          <span
+            className={cn(
+              "hidden text-[10px] uppercase tracking-wide md:inline",
+              lightToolbar ? "text-stone-500" : "text-white/35",
+            )}
+          >
             {STATUS_TEXT[status]}
           </span>
           <div className="ml-auto flex items-center gap-1">
@@ -403,37 +410,63 @@ export function XTerminal({
               type="button"
               onClick={() => changeFont(-1)}
               disabled={prefs.fontSize <= MIN_FONT}
-              className="flex h-6 w-6 items-center justify-center rounded text-white/60 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded transition disabled:opacity-30",
+                lightToolbar
+                  ? "text-stone-600 hover:bg-black/8 hover:text-stone-900"
+                  : "text-white/60 hover:bg-white/10 hover:text-white",
+              )}
               title="Decrease font size"
               aria-label="Decrease terminal font size"
             >
               <Minus className="h-3 w-3" />
             </button>
-            <span className="w-7 text-center text-[10px] tabular-nums text-white/40">
+            <span
+              className={cn(
+                "w-7 text-center text-[10px] tabular-nums",
+                lightToolbar ? "text-stone-500" : "text-white/45",
+              )}
+            >
               {prefs.fontSize}px
             </span>
             <button
               type="button"
               onClick={() => changeFont(1)}
               disabled={prefs.fontSize >= MAX_FONT}
-              className="flex h-6 w-6 items-center justify-center rounded text-white/60 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded transition disabled:opacity-30",
+                lightToolbar
+                  ? "text-stone-600 hover:bg-black/8 hover:text-stone-900"
+                  : "text-white/60 hover:bg-white/10 hover:text-white",
+              )}
               title="Increase font size"
               aria-label="Increase terminal font size"
             >
               <Plus className="h-3 w-3" />
             </button>
-            <span className="mx-1 h-4 w-px bg-white/10" />
+            <span
+              className={cn("mx-1 h-4 w-px", lightToolbar ? "bg-black/10" : "bg-white/10")}
+            />
             <select
               value={prefs.theme}
               onChange={(event) =>
                 setPrefs((current) => ({ ...current, theme: event.target.value }))
               }
-              className="h-6 rounded border border-white/10 bg-black/30 px-1.5 text-[10px] text-white/70 outline-none focus:border-white/30"
+              className={cn(
+                "h-6 rounded border px-1.5 text-[10px] outline-none",
+                lightToolbar
+                  ? "border-black/15 bg-white/70 text-stone-800 focus:border-black/35"
+                  : "border-white/12 bg-black/30 text-white/80 focus:border-white/30",
+              )}
               aria-label="Terminal theme"
               title="Terminal theme"
             >
               {Object.entries(THEMES).map(([key, value]) => (
-                <option key={key} value={key} className="bg-[#18181b] text-white">
+                <option
+                  key={key}
+                  value={key}
+                  className={lightToolbar ? "bg-white text-stone-900" : "bg-[#18181b] text-white"}
+                >
                   {value.label}
                 </option>
               ))}
@@ -442,7 +475,12 @@ export function XTerminal({
               type="button"
               onClick={() => connectRef.current?.()}
               disabled={status === "connected" || status === "connecting"}
-              className="ml-1 flex h-6 items-center gap-1 rounded px-1.5 text-[10px] text-white/55 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+              className={cn(
+                "ml-1 flex h-6 items-center gap-1 rounded px-1.5 text-[10px] transition disabled:opacity-30",
+                lightToolbar
+                  ? "text-stone-600 hover:bg-black/8 hover:text-stone-900"
+                  : "text-white/60 hover:bg-white/10 hover:text-white",
+              )}
               title="Reconnect terminal"
             >
               <RotateCw className="h-3 w-3" />

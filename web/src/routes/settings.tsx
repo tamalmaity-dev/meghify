@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Copy, KeyRound, ShieldCheck } from "lucide-react";
+import { Copy, KeyRound, Monitor, Moon, ShieldCheck, Sun } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useTheme, type ThemePreference } from "@/lib/theme";
 import { PageHeader } from "@/components/app-shell";
 import { UpdateCard } from "@/components/update-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,10 +15,9 @@ import {
   useTotpDisable,
   useTotpEnroll,
 } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 
-/** Clipboard is unavailable on plain-HTTP origins. Never fail silently: the
- * user needs a way to get a one-time token or TOTP seed off the screen. */
 async function copyText(value: string, label: string) {
   try {
     await navigator.clipboard.writeText(value);
@@ -27,8 +27,20 @@ async function copyText(value: string, label: string) {
   }
 }
 
+const THEME_OPTIONS: {
+  value: ThemePreference;
+  label: string;
+  description: string;
+  icon: typeof Sun;
+}[] = [
+  { value: "light", label: "Light", description: "Crisp bright surfaces", icon: Sun },
+  { value: "dark", label: "Dark", description: "Low-glare dark surfaces", icon: Moon },
+  { value: "system", label: "System", description: "Match OS preference", icon: Monitor },
+];
+
 export function SettingsPage() {
   const { user, version } = useSession();
+  const { theme, setTheme } = useTheme();
   const changePassword = useChangePassword();
   const enroll = useTotpEnroll();
   const confirmTotp = useTotpConfirm();
@@ -101,7 +113,6 @@ export function SettingsPage() {
     try {
       const result = await api.post<{ token: string }>("/tokens", {
         name: "pipeline",
-        // An explicit scope list documents intent and limits a leaked token.
         scopes: ["read", "write", "deploy"],
       });
       setIssuedToken(result.token);
@@ -113,7 +124,50 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Instance and account configuration." />
+      <PageHeader title="Settings" description="Instance, appearance, and account configuration." />
+
+      <Card className="mb-3">
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <span className="text-[11px] text-faint">Stored per browser</span>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            {THEME_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              const active = theme === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setTheme(option.value)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors cursor-pointer",
+                    active
+                      ? "border-brand bg-brand/8 text-ink"
+                      : "border-line/70 bg-recessed/50 text-muted hover:border-line hover:bg-recessed hover:text-ink",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border",
+                      active
+                        ? "border-brand/30 bg-brand/15 text-brand"
+                        : "border-line/60 bg-base text-muted",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[12.5px] font-semibold text-ink">{option.label}</div>
+                    <div className="text-[11px] text-faint">{option.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
@@ -122,16 +176,16 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-[12px]">
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Email</span>
-              <span className="font-mono">{user?.email}</span>
+              <span className="text-muted">Email</span>
+              <span className="font-mono text-ink">{user?.email}</span>
             </div>
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Role</span>
-              <span className="font-mono">{user?.role}</span>
+              <span className="text-muted">Role</span>
+              <span className="font-mono text-ink">{user?.role}</span>
             </div>
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Two-factor</span>
-              <span className="font-mono">{user?.totpEnabled ? "enabled" : "off"}</span>
+              <span className="text-muted">Two-factor</span>
+              <span className="font-mono text-ink">{user?.totpEnabled ? "enabled" : "off"}</span>
             </div>
           </CardContent>
         </Card>
@@ -142,18 +196,18 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-[12px]">
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Version</span>
-              <span className="font-mono">{version ?? "dev"}</span>
+              <span className="text-muted">Version</span>
+              <span className="font-mono text-ink">{version ?? "dev"}</span>
             </div>
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Database</span>
-              <span className="font-mono">SQLite (WAL)</span>
+              <span className="text-muted">Database</span>
+              <span className="font-mono text-ink">SQLite (WAL)</span>
             </div>
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-black/45 dark:text-white/40">Queue</span>
-              <span className="font-mono">database backed</span>
+              <span className="text-muted">Queue</span>
+              <span className="font-mono text-ink">database backed</span>
             </div>
-            <p className="pt-1 text-[11px] text-black/45 dark:text-white/40">
+            <p className="pt-1 text-[11px] text-faint">
               Settings are read from environment variables at boot. AUTH_SECRET, DB_DSN,
               DATA_DIR and DOCKER_HOST drive behaviour.
             </p>
@@ -169,7 +223,7 @@ export function SettingsPage() {
           <CardContent className="space-y-3">
             {user?.totpEnabled ? (
               <>
-                <div className="flex items-center gap-2 rounded-md bg-recessed px-3 py-2 text-[12px] text-emerald-600 dark:text-emerald-400">
+                <div className="flex items-center gap-2 rounded-lg border border-ok/25 bg-ok/10 px-3 py-2 text-[12px] font-medium text-ok">
                   <ShieldCheck className="h-4 w-4" />
                   TOTP is protecting this account.
                 </div>
@@ -192,7 +246,7 @@ export function SettingsPage() {
               </>
             ) : totpSecret ? (
               <>
-                <p className="text-[11px] text-black/50 dark:text-white/45">
+                <p className="text-[11.5px] text-muted">
                   Add this account to your authenticator app, then enter the six-digit code.
                   The secret is shown only while you finish enrolment.
                 </p>
@@ -246,7 +300,7 @@ export function SettingsPage() {
               </>
             ) : (
               <>
-                <p className="text-[11px] text-black/50 dark:text-white/45">
+                <p className="text-[11.5px] text-muted">
                   Require a code from an authenticator app in addition to your password.
                 </p>
                 <Button
@@ -309,7 +363,7 @@ export function SettingsPage() {
             <CardTitle>API access</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-[11px] text-black/50 dark:text-white/45">
+            <p className="text-[11.5px] text-muted">
               Issue a scoped token to automate deployments from a pipeline. Tokens are shown
               once and stored only as a hash.
             </p>

@@ -36,7 +36,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[8vh]">
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-black/50 backdrop-blur-[2px] dark:bg-black/65"
         onClick={onClose}
         aria-hidden
       />
@@ -45,17 +45,15 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "relative z-10 w-full max-w-lg rounded-[8px] card-lift bg-base shadow-[var(--shadow-modal)]",
-          "border border-line/70",
+          "relative z-10 w-full max-w-lg overflow-hidden rounded-xl bg-base text-ink shadow-[var(--shadow-modal)]",
+          "border border-line/85",
         )}
       >
-        <div className="flex items-start justify-between gap-4 rounded-t-[8px] bg-white/[0.03] px-4 py-3">
+        <div className="flex items-start justify-between gap-4 border-b border-line/60 bg-recessed/50 px-4 py-3">
           <div>
-            <h2 className="text-[15px] font-semibold">{title}</h2>
+            <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
             {description && (
-              <p className="mt-0.5 text-[11px] text-black/50 dark:text-white/45">
-                {description}
-              </p>
+              <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted">{description}</p>
             )}
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
@@ -68,7 +66,7 @@ export function Modal({
         <div className="p-4">{children}</div>
 
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-line/50 px-4 py-3">
+          <div className="flex items-center justify-end gap-2 border-t border-line/60 bg-recessed/35 px-4 py-3">
             {footer}
           </div>
         )}

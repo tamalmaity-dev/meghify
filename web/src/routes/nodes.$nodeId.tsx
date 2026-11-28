@@ -1,5 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, RefreshCw, Server, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Activity,
+  ChevronLeft,
+  HardDrive,
+  RefreshCw,
+  Server,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  TerminalSquare,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
@@ -20,24 +31,18 @@ import { createFileRoute } from "@tanstack/react-router";
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const SECTIONS = [
-  { key: "general", label: "General" },
-  { key: "terminal", label: "Terminal" },
-  { key: "metrics", label: "Metrics" },
-  { key: "docker", label: "Docker cleanup" },
-  { key: "guard", label: "Resource protection" },
-  { key: "danger", label: "Danger zone" },
+  { key: "general", label: "General", icon: Settings },
+  { key: "terminal", label: "Terminal", icon: TerminalSquare },
+  { key: "metrics", label: "Metrics", icon: Activity },
+  { key: "docker", label: "Docker cleanup", icon: HardDrive },
+  { key: "guard", label: "Resource protection", icon: ShieldCheck },
+  { key: "danger", label: "Danger zone", icon: ShieldAlert },
 ] as const;
 
 type Section = (typeof SECTIONS)[number]["key"];
 
-/** The singleton row that describes the machine the panel runs on. */
 const LOCAL_NODE_ID = "local";
 
-/**
- * One server, laid out like Coolify's server page: an overview of the facts
- * the engine reported, the editable connection details, an interactive
- * terminal and the machine's metrics.
- */
 export function NodeDetailPage() {
   const { nodeId } = useParams({ from: "/nodes/$nodeId" });
   const queryClient = useQueryClient();
@@ -69,9 +74,6 @@ export function NodeDetailPage() {
     });
   }, [node.data]);
 
-  // Docker cleanup and the panel-wide resource guard are configured from the
-  // local server page. Hide those panes on remote servers rather than showing
-  // controls that would silently affect another machine.
   useEffect(() => {
     if (
       (section === "docker" || section === "guard") &&
@@ -120,13 +122,13 @@ export function NodeDetailPage() {
       <>
         <Link
           to="/nodes"
-          className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+          className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
           All servers
         </Link>
         <Card>
-          <CardContent className="py-8 text-center text-[12px] text-black/45 dark:text-white/40">
+          <CardContent className="py-8 text-center text-[12px] text-muted">
             {node.isError ? errorText(node.error) : "Loading server…"}
           </CardContent>
         </Card>
@@ -136,9 +138,6 @@ export function NodeDetailPage() {
 
   const server = node.data;
   const isLocal = server.id === LOCAL_NODE_ID;
-  // Cleanup runs against the panel's own Docker engine, so it is not offered
-  // on remote nodes until their engines are managed by the cleanup service.
-  // The resource guard is panel-wide but stays beside it on the local page.
   const sections = isLocal
     ? SECTIONS
     : SECTIONS.filter((item) => item.key !== "docker" && item.key !== "guard");
@@ -150,7 +149,7 @@ export function NodeDetailPage() {
     <>
       <Link
         to="/nodes"
-        className="mb-2 inline-flex items-center gap-1 text-[11px] text-black/45 transition-colors hover:text-current dark:text-white/40"
+        className="mb-2 inline-flex items-center gap-1 text-[11.5px] text-muted transition-colors hover:text-ink"
       >
         <ChevronLeft className="h-3.5 w-3.5" />
         All servers
@@ -166,23 +165,30 @@ export function NodeDetailPage() {
         actions={<StatusBadge status={server.status} />}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-        <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-          {sections.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => setSection(item.key)}
-              className={cn(
-                "h-8 rounded-md px-3 text-left text-[12px] whitespace-nowrap transition-colors",
-                section === item.key
-                  ? "bg-black/[0.06] font-medium text-current dark:bg-white/[0.08]"
-                  : "text-black/55 hover:bg-black/[0.03] hover:text-current dark:text-white/45 dark:hover:bg-white/[0.04]",
-                item.key === "danger" && section !== "danger" && "text-danger/80 hover:text-danger",
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
+      <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+        <nav className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          {sections.map((item) => {
+            const Icon = item.icon;
+            const active = section === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setSection(item.key)}
+                className={cn(
+                  "flex h-8.5 items-center gap-2 rounded-lg px-2.5 text-left text-[12.5px] whitespace-nowrap transition-colors cursor-pointer",
+                  active
+                    ? item.key === "danger"
+                      ? "bg-danger/12 font-medium text-danger"
+                      : "bg-brand/12 font-medium text-brand"
+                    : "text-muted hover:bg-recessed hover:text-ink",
+                  item.key === "danger" && !active && "text-danger/80 hover:bg-danger/8 hover:text-danger",
+                )}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="min-w-0">
@@ -204,7 +210,7 @@ export function NodeDetailPage() {
                       />
                     </Button>
                     {ready ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-ok/10 px-2 py-0.5 text-[10.5px] font-medium text-ok">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/25 bg-ok/12 px-2.5 py-0.5 text-[10.5px] font-medium text-ok">
                         <span className="h-1.5 w-1.5 rounded-full bg-ok" />
                         Ready
                       </span>
@@ -214,13 +220,13 @@ export function NodeDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-start gap-3 border-b border-line/40 pb-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-black/[0.06] dark:bg-white/[0.06]">
+                  <div className="flex items-start gap-3 border-b border-line/50 pb-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line/60 bg-recessed text-brand">
                       <Server className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <div className="text-[13px] font-medium">{server.name}</div>
-                      <p className="mt-0.5 text-[11.5px] leading-relaxed text-black/50 dark:text-white/45">
+                      <div className="text-[13.5px] font-semibold text-ink">{server.name}</div>
+                      <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted">
                         {server.description ||
                           (ready
                             ? "The server is reachable, validated, and ready to host resources."
@@ -247,7 +253,7 @@ export function NodeDetailPage() {
                   </div>
 
                   {server.errorMessage && (
-                    <p className="mt-3 rounded-md bg-danger/10 px-3 py-2 text-[11.5px] text-danger">
+                    <p className="mt-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11.5px] text-danger">
                       {server.errorMessage}
                     </p>
                   )}
@@ -331,20 +337,20 @@ export function NodeDetailPage() {
                         placeholder="SHA256:... (pinned on first connection)"
                         className="font-mono"
                       />
-                      <p className="mt-1 text-[10.5px] text-black/40 dark:text-white/35">
+                      <p className="mt-1 text-[10.5px] text-faint">
                         Pinned automatically the first time the panel connects. Paste the
                         server&apos;s key first if you want to pin before connecting.
                       </p>
                     </div>
                   )}
                   {isLocal && (
-                    <p className="flex items-center gap-1.5 text-[11px] text-black/45 dark:text-white/40">
-                      <ShieldCheck className="h-3.5 w-3.5" />
+                    <p className="flex items-center gap-1.5 text-[11px] text-muted">
+                      <ShieldCheck className="h-3.5 w-3.5 text-ok" />
                       This is the server where Meghify is running; only its name and description can
                       be changed, and it cannot be removed.
                     </p>
                   )}
-                  <div className="flex justify-end border-t border-line/40 pt-3">
+                  <div className="flex justify-end border-t border-line/50 pt-3">
                     <Button
                       variant="primary"
                       size="sm"
@@ -360,17 +366,17 @@ export function NodeDetailPage() {
           )}
 
           {section === "terminal" && (
-            <Card>
+            <Card className="overflow-hidden">
               <CardHeader>
                 <CardTitle>Terminal</CardTitle>
-                <span className="text-[11px] text-black/40 dark:text-white/35">
+                <span className="text-[11px] text-faint">
                   {isLocal
                     ? "shell in a helper container with the docker CLI (engine socket mounted)"
                     : `ssh shell as ${server.sshUser}@${server.address}`}
                 </span>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="h-[28rem] overflow-hidden rounded-b-[8px] bg-[#0a0a0a]">
+                <div className="h-[28rem] overflow-hidden">
                   <XTerminal
                     url={terminalUrl}
                     className="h-full"
@@ -394,23 +400,23 @@ export function NodeDetailPage() {
           {section === "guard" && isLocal && <ResourceGuardPanel />}
 
           {section === "danger" && (
-            <Card>
+            <Card className={isLocal ? undefined : "border-danger/30"}>
               <CardHeader>
                 <CardTitle>Danger zone</CardTitle>
               </CardHeader>
               <CardContent>
                 {isLocal ? (
-                  <p className="flex items-start gap-2 text-[12px] leading-relaxed text-black/55 dark:text-white/45">
+                  <p className="flex items-start gap-2 text-[12px] leading-relaxed text-muted">
                     <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ok" />
                     This is the server where Meghify is running on. It is the panel&apos;s default
                     server and cannot be removed — the dashboard, metrics and local deployments all
                     depend on it.
                   </p>
                 ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/25 bg-danger/5 p-3">
                     <div>
-                      <div className="text-[12.5px] font-medium">Remove this server</div>
-                      <p className="mt-0.5 text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+                      <div className="text-[12.5px] font-medium text-ink">Remove this server</div>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
                         Containers keep running on the machine; the panel simply stops managing it.
                         Applications and databases pointing here lose their engine connection.
                       </p>
@@ -442,15 +448,14 @@ export function NodeDetailPage() {
   );
 }
 
-/** One fact row of the Server overview grid. */
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10.5px] tracking-wider text-black/40 uppercase dark:text-white/35">
+      <div className="text-[10.5px] font-semibold tracking-wider text-faint uppercase">
         {label}
       </div>
-      <div className="mt-0.5 truncate text-[12.5px] font-medium">
-        {value || <span className="text-black/30 dark:text-white/25">unknown</span>}
+      <div className="mt-0.5 truncate text-[12.5px] font-medium text-ink">
+        {value || <span className="text-faint">unknown</span>}
       </div>
     </div>
   );
